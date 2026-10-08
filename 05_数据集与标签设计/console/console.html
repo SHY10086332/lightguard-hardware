@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据集采集台 · LIGHTGUARD</title>
+<style>
+  :root{
+    --bg:#f5f7fb; --card:#fff; --line:#e3e8f0; --text:#1b2430; --dim:#6b7686;
+    --brand:#2f6fed; --brand-dk:#2558c4; --ok:#18a058; --warn:#e8a33d; --bad:#d9534f;
+    --shadow:0 2px 10px rgba(21,42,80,.07);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 22px;
+         display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:9}
+  header h1{font-size:17px;margin:0;font-weight:650}
+  header .tag{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:20px;padding:2px 10px}
+  header .grow{flex:1}
+  main{max-width:1180px;margin:18px auto 60px;padding:0 18px;
+       display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:16px}
+  .card h2{font-size:14px;margin:0 0 12px;font-weight:650;display:flex;align-items:center;gap:8px}
+  .card h2 small{color:var(--dim);font-weight:400}
+  video{width:100%;background:#0b0f16;border-radius:8px;display:block;aspect-ratio:16/9;object-fit:contain}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;border:1px solid var(--line);background:#fff;color:var(--text);
+         border-radius:8px;padding:8px 14px;cursor:pointer;transition:.15s}
+  button:hover:not(:disabled){border-color:#c6d2e6;background:#f7f9fd}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+  button.primary:hover:not(:disabled){background:var(--brand-dk);border-color:var(--brand-dk)}
+  button.ghost-danger{color:var(--bad)}
+  .mt{margin-top:12px}
+  /* 硬件状态 */
+  .stat{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;text-align:center}
+  .stat div{background:#f8fafd;border:1px solid var(--line);border-radius:9px;padding:9px 6px}
+  .stat .k{font-size:12px;color:var(--dim)}
+  .stat .v{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}
+  .pill{display:inline-block;font-size:12px;border-radius:20px;padding:1px 9px;border:1px solid transparent}
+  .pill.ok{background:#e8f7ee;color:var(--ok);border-color:#bfe6cf}
+  .pill.warn{background:#fdf4e3;color:#a9741d;border-color:#f0dcb4}
+  .pill.bad{background:#fdeceb;color:var(--bad);border-color:#f3c9c7}
+  /* 类别 */
+  .cats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .cat{border:1px solid var(--line);border-radius:9px;padding:9px 8px;cursor:pointer;background:#fff;text-align:left}
+  .cat:hover{border-color:#c6d2e6;background:#f7f9fd}
+  .cat.sel{border-color:var(--brand);background:#eef4ff;box-shadow:inset 0 0 0 1px var(--brand)}
+  .cat b{display:block;font-size:13px}
+  .cat span{font-size:11px;color:var(--dim);display:block;line-height:1.35}
+  .cat i{font-style:normal;font-size:15px;font-weight:700;color:var(--brand);float:right}
+  /* 最近 */
+  .thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .thumb{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#f8fafd}
+  .thumb img{width:100%;height:64px;object-fit:cover;display:block}
+  .thumb span{display:block;font-size:10px;color:var(--dim);padding:2px 5px;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .msg{border-radius:8px;padding:9px 12px;font-size:13px;display:none}
+  .msg.show{display:block}
+  .msg.ok{background:#e8f7ee;color:#12683c;border:1px solid #bfe6cf}
+  .msg.err{background:#fdeceb;color:#a3352f;border:1px solid #f3c9c7}
+  .msg.info{background:#eef4ff;color:#1f4fa8;border:1px solid #cfdefb}
+  .pathline{font-size:12px;color:var(--dim);word-break:break-all}
+  kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;
+      font-size:11px;background:#fafbfd;font-family:inherit}
+  .hint{font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>📦 数据集采集台</h1>
+  <span class="tag" id="hw-tag">硬件：连接中…</span>
+  <span class="tag" id="total-tag">已采集 0 张</span>
+  <span class="grow"></span>
+  <button id="btn-export">导出数据集 zip</button>
+</header>
+
+<main>
+  <!-- 左：相机 -->
+  <section class="card">
+    <h2>相机预览 <small>采集时必须保持与演示相同的光照与距离</small></h2>
+    <video id="video" playsinline muted></video>
+    <div class="row mt">
+      <button class="primary" id="btn-open">打开摄像头</button>
+      <button id="btn-close" disabled>关闭</button>
+      <select id="cam-select" title="摄像头" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line)"></select>
+    </div>
+    <div class="row mt">
+      <button class="primary" id="btn-shot" disabled style="font-size:15px;padding:10px 22px">📷 采集一张</button>
+      <button id="btn-undo">↶ 撤销上一张</button>
+      <span class="hint"><kbd>Enter</kbd> 采集 · <kbd>Z</kbd> 撤销 · <kbd>0</kbd> 关灯</span>
+    </div>
+    <div class="msg mt" id="msg"></div>
+  </section>
+
+  <!-- 右：状态 + 类别 -->
+  <section class="card">
+    <h2>硬件状态 <small id="port-line"></small></h2>
+    <div class="stat">
+      <div><div class="k">照度 lx</div><div class="v" id="v-lux">--</div></div>
+      <div><div class="k">亮度 %</div><div class="v" id="v-br">--</div></div>
+      <div><div class="k">照度稳定</div><div class="v" id="v-stab">--</div></div>
+      <div><div class="k">指示结果</div><div class="v" id="v-res">--</div></div>
+    </div>
+    <div class="row mt">
+      <input id="br-input" type="number" min="0" max="100" value="25"
+             style="width:76px;padding:7px 9px;border-radius:8px;border:1px solid var(--line)">
+      <button id="btn-set">设为该亮度</button>
+      <button id="btn-off" class="ghost-danger">关灯 (LIGHT 0)</button>
+      <span class="hint">实测工作区间 20%~35%，100% 会过曝</span>
+    </div>
+
+    <h2 class="mt" style="margin-top:18px">选择类别 <small>点一下切换</small></h2>
+    <div class="cats" id="cats"></div>
+
+    <h2 class="mt" style="margin-top:18px">最近采集</h2>
+    <div class="thumbs" id="thumbs"><span class="hint">还没有样本</span></div>
+    <div class="pathline mt" id="path-line"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let curClass = 'normal', busy = false, stream = null, luxHist = [];
+
+  // ---------------- 提示 ----------------
+  let msgTimer = null;
+  function say(text, kind = 'info') {
+    const el = $('msg');
+    el.className = 'msg show ' + kind;
+    el.textContent = text;
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => el.classList.remove('show'), 4200);
+  }
+
+  // ---------------- 类别按钮 ----------------
+  let CLASSES = [];
+  async function loadClasses() {
+    const s = await (await fetch('/api/status')).json();
+    CLASSES = s.classes;
+    $('br-input').value = s.default_brightness;
+    const box = $('cats');
+    box.innerHTML = '';
+    CLASSES.forEach((c) => {
+      const b = document.createElement('button');
+      b.className = 'cat' + (c.key === curClass ? ' sel' : '');
+      b.dataset.k = c.key;
+      b.innerHTML = `<i>0</i><b>${c.label}</b><span>${c.key}</span>`;
+      b.onclick = () => { curClass = c.key; renderSel(); $('btn-shot').focus(); };
+      box.appendChild(b);
+    });
+    renderSel();
+    applyStatus(s);
+  }
+  function renderSel() {
+    document.querySelectorAll('.cat').forEach((x) =>
+      x.classList.toggle('sel', x.dataset.k === curClass));
+  }
+
+  // ---------------- 状态刷新 ----------------
+  function applyStatus(s) {
+    const hw = s.hardware || {};
+    const tag = $('hw-tag');
+    if (hw.connected) {
+      tag.textContent = '硬件：已连接 ' + hw.port;
+      tag.style.color = '';
+    } else {
+      tag.textContent = '硬件：未连接' + (hw.error ? '（' + hw.error + '）' : '');
+      tag.style.color = '#d9534f';
+    }
+    $('port-line').textContent = hw.connected ? hw.port : '';
+
+    const lux = (hw.lux === null || hw.lux === undefined) ? null : Number(hw.lux);
+    $('v-lux').textContent = lux === null ? '--' : lux.toFixed(1);
+    $('v-br').textContent = (hw.brightness === null || hw.brightness === undefined) ? '--' : hw.brightness + '%';
+    $('v-res').textContent = hw.result ? hw.result : '--';
+
+    if (lux !== null && hw.brightness) {
+      luxHist.push(lux);
+      if (luxHist.length > 5) luxHist.shift();
+      const spread = Math.max(...luxHist) - Math.min(...luxHist);
+      const el = $('v-stab');
+      if (luxHist.length < 3) { el.textContent = '…'; el.title = ''; }
+      else if (spread <= 15) { el.innerHTML = '<span class="pill ok">稳定</span>'; el.title = '最近 5 次波动 ' + spread.toFixed(1) + ' lx'; }
+      else { el.innerHTML = '<span class="pill warn">变动中</span>'; el.title = '最近 5 次波动 ' + spread.toFixed(1) + ' lx'; }
+    } else {
+      $('v-stab').textContent = '--';
+    }
+
+    const per = (s.dataset && s.dataset.per_class) || {};
+    document.querySelectorAll('.cat').forEach((x) => { x.querySelector('i').textContent = per[x.dataset.k] || 0; });
+    $('total-tag').textContent = '已采集 ' + ((s.dataset && s.dataset.total) || 0) + ' 张';
+    if (s.dataset && s.dataset.root) {
+      $('path-line').textContent = '输出目录：' + s.dataset.root + '　记录表：' + s.dataset.csv;
+    }
+  }
+
+  async function poll() {
+    if (busy) return;                      // 采集中不抢串口
+    try { applyStatus(await (await fetch('/api/status')).json()); } catch (e) {}
+  }
+
+  async function loadRecent() {
+    try {
+      const s = await (await fetch('/api/recent?limit=12')).json();
+      const box = $('thumbs');
+      if (!s.files || !s.files.length) { box.innerHTML = '<span class="hint">还没有样本</span>'; return; }
+      box.innerHTML = s.files.map((f) =>
+        `<div class="thumb"><img src="/api/thumb/${f.class}/${encodeURIComponent(f.file)}" alt="">
+         <span title="${f.file}">${f.file}</span></div>`).join('');
+    } catch (e) {}
+  }
+
+  // ---------------- 摄像头 ----------------
+  async function listCams() {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      const sel = $('cam-select');
+      const keep = sel.value;
+      sel.innerHTML = devs.map((d, i) => `<option value="${d.deviceId}">${d.label || ('摄像头 ' + (i + 1))}</option>`).join('');
+      if (keep) sel.value = keep;
+    } catch (e) {}
+  }
+  async function openCam() {
+    try {
+      const id = $('cam-select').value;
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: id ? { deviceId: { exact: id } } : { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      $('video').srcObject = stream;
+      $('btn-shot').disabled = false;
+      $('btn-close').disabled = false;
+      $('btn-open').disabled = true;
+      await listCams();
+      say('摄像头已打开。先确认画面里的标签清晰、光照均匀，再开始采集。', 'ok');
+    } catch (e) {
+      say('打不开摄像头：' + e.message + '（请用 http://127.0.0.1 打开本页，并允许摄像头权限）', 'err');
+    }
+  }
+  function closeCam() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; $('video').srcObject = null;
+    $('btn-shot').disabled = true; $('btn-close').disabled = true; $('btn-open').disabled = false;
+  }
+
+  // ---------------- 采集 ----------------
+  function grab() {
+    const v = $('video');
+    const cv = document.createElement('canvas');
+    cv.width = v.videoWidth; cv.height = v.videoHeight;
+    cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+    return new Promise((res) => cv.toBlob((b) => res(b), 'image/jpeg', 0.95));
+  }
+  async function shoot() {
+    if (busy) return;
+    if (!stream) { say('先点「打开摄像头」', 'err'); return; }
+    busy = true;
+    $('btn-shot').disabled = true;
+    $('btn-undo').disabled = true;
+    try {
+      const blob = await grab();
+      if (!blob) throw new Error('抓帧失败');
+      const fd = new FormData();
+      fd.append('class', curClass);
+      fd.append('image', blob, curClass + '.jpg');
+      const r = await (await fetch('/api/capture', { method: 'POST', body: fd })).json();
+      if (!r.ok) throw new Error(r.error || '保存失败');
+      const d = r.dataset;
+      const luxTxt = (d.lux === null || d.lux === undefined) ? '照度未记录' : (d.lux + ' lx');
+      say(`已保存 ${d.file}（${d.class_label}）· ${luxTxt} · 亮度 ${d.brightness === null || d.brightness === undefined ? '--' : d.brightness + '%'}`, 'ok');
+      await loadRecent();
+      await poll();
+    } catch (e) {
+      say('采集失败：' + e.message, 'err');
+    } finally {
+      busy = false;
+      $('btn-shot').disabled = false;
+      $('btn-undo').disabled = false;
+    }
+  }
+  async function undo() {
+    if (busy) return;
+    try {
+      const r = await (await fetch('/api/undo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ class: curClass }),
+      })).json();
+      if (!r.ok) throw new Error(r.error || '撤销失败');
+      say('已撤销 ' + r.deleted + '，该类别剩 ' + r.count + ' 张', 'info');
+      await loadRecent(); await poll();
+    } catch (e) { say('撤销失败：' + e.message, 'err'); }
+  }
+  async function setLight(n) {
+    try {
+      const r = await (await fetch('/api/light', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brightness: n }),
+      })).json();
+      if (!r.ok) throw new Error(r.error || '设置失败');
+      say('已设为 ' + n + '%' + (n === 0 ? '（灯已关）' : ''), 'info');
+      await poll();
+    } catch (e) { say('设置亮度失败：' + e.message, 'err'); }
+  }
+
+  // ---------------- 事件 ----------------
+  $('btn-open').onclick = openCam;
+  $('btn-close').onclick = closeCam;
+  $('cam-select').onchange = async () => { if (stream) { closeCam(); await openCam(); } };
+  $('btn-shot').onclick = shoot;
+  $('btn-undo').onclick = undo;
+  $('btn-set').onclick = () => setLight(parseInt($('br-input').value || '25', 10));
+  $('btn-off').onclick = () => setLight(0);
+  $('btn-export').onclick = () => { window.location = '/api/export'; };
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === 'Enter') { e.preventDefault(); shoot(); }
+    else if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); undo(); }
+    else if (e.key === '0') { e.preventDefault(); setLight(0); }
+  });
+  window.addEventListener('beforeunload', () => { if (stream) stream.getTracks().forEach((t) => t.stop()); });
+
+  loadClasses().then(loadRecent);
+  setInterval(poll, 800);
+  setInterval(loadRecent, 6000);
+  navigator.mediaDevices && navigator.mediaDevices.addEventListener &&
+    navigator.mediaDevices.addEventListener('devicechange', listCams);
+})();
+</script>
+</body>
+</html>

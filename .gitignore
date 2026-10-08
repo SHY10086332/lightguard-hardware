@@ -1,0 +1,20 @@
+# 运行时产生的采集数据，不入库
+dataset/
+**/dataset/
+images/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 备份目录（接入脚本会自动生成 _backup_<时间戳>）
+_backup_*/
+_backup_*
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

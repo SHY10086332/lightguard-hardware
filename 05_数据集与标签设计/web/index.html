@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>光稳智检 · 数据集采集台</title>
+<style>
+  :root { --bg:#0f1720; --card:#182430; --line:#26384a; --fg:#e8eef4; --dim:#93a7ba;
+          --ok:#39d98a; --warn:#ffcc4d; --bad:#ff6b6b; --acc:#4da3ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:"Microsoft YaHei",system-ui,sans-serif; font-size:15px; }
+  header { padding:14px 20px; background:#132030; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; }
+  h1 small { color:var(--dim); font-weight:normal; font-size:13px; margin-left:10px; }
+  .wrap { display:grid; grid-template-columns: 420px 1fr; gap:16px; padding:16px; align-items:start; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--acc); font-weight:600; }
+  button { background:#24405c; color:var(--fg); border:1px solid #33587c; border-radius:8px;
+           padding:9px 14px; font-size:14px; cursor:pointer; font-family:inherit; }
+  button:hover:not(:disabled) { background:#2d527a; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.big { width:100%; padding:16px; font-size:20px; font-weight:bold; background:#1f6f45;
+               border-color:#2f9d63; }
+  button.big:hover:not(:disabled) { background:#288a56; }
+  .row { display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
+  .st { font-size:13px; }
+  .st.ok  { color:var(--ok); } .st.no { color:var(--dim); } .st.bad { color:var(--bad); }
+  .lux { font-size:34px; font-weight:bold; font-variant-numeric:tabular-nums; }
+  .lux.steady { color:var(--ok); } .lux.unsteady { color:var(--warn); }
+  .cats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .cat { padding:10px; border-radius:8px; border:1px solid var(--line); background:#1d2b39;
+         cursor:pointer; text-align:left; font-size:14px; line-height:1.35; }
+  .cat.sel { border-color:var(--acc); background:#20405e; box-shadow:0 0 0 1px var(--acc) inset; }
+  .cat b { display:block; font-size:14px; }
+  .cat span { color:var(--dim); font-size:12px; }
+  video { width:100%; background:#000; border-radius:8px; display:block; }
+  .thumbs { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .thumbs img { width:106px; height:70px; object-fit:cover; border-radius:6px; border:1px solid var(--line); }
+  #log { height:150px; overflow:auto; background:#0b131b; border:1px solid var(--line);
+         border-radius:8px; padding:8px; font-family:Consolas,monospace; font-size:12.5px;
+         white-space:pre-wrap; line-height:1.45; }
+  input[type=number] { width:70px; padding:6px; border-radius:6px; border:1px solid #33587c;
+                       background:#0f1a24; color:var(--fg); font-size:14px; }
+  input[type=text] { padding:6px 8px; border-radius:6px; border:1px solid #33587c;
+                     background:#0f1a24; color:var(--fg); font-size:13px; width:100%; }
+  .hint { color:var(--dim); font-size:12.5px; line-height:1.5; }
+  .kbd { background:#0b131b; border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:12px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:99px; background:#0b131b;
+          border:1px solid var(--line); font-size:12px; color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>光稳智检 · 数据集采集台 <small>网页版（实时预览 + 照度稳定检测 + 自动记录）</small></h1>
+</header>
+
+<div class="wrap">
+  <!-- ================= 左栏 ================= -->
+  <div>
+    <div class="card">
+      <h2>① 连接设备</h2>
+      <div class="row">
+        <button id="btnSerial">连接 ESP32 串口</button>
+        <span class="st no" id="stSerial">未连接</span>
+      </div>
+      <div class="row">
+        <button id="btnCam">打开摄像头</button>
+        <span class="st no" id="stCam">未打开</span>
+      </div>
+      <div class="row">
+        <select id="camList" style="flex:1;padding:6px;border-radius:6px;background:#0f1a24;color:#e8eef4;border:1px solid #33587c"></select>
+        <button id="btnCamPick">切换</button>
+      </div>
+      <div class="row">
+        <button id="btnDir">选择保存目录</button>
+        <span class="st no" id="stDir">未选择</span>
+      </div>
+      <div class="hint">保存目录请选 <b>dataset</b> 文件夹（照片会写进它下面的 images\&lt;类别&gt;\）</div>
+    </div>
+
+    <div class="card">
+      <h2>② 光照</h2>
+      <div class="row">
+        <span>亮度</span>
+        <input type="number" id="bright" value="25" min="0" max="100">
+        <span>%</span>
+        <button id="btnBright">应用</button>
+        <span class="pill" id="curBright">当前 —</span>
+      </div>
+      <div class="lux unsteady" id="lux">— lx</div>
+      <div class="row">
+        <span class="st" id="luxSt">等待串口…</span>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="waitSteady" checked> 拍照前等照度稳定（推荐）</label>
+      </div>
+      <div class="hint">箱内工作亮度建议 <b>20~35%</b>（按实测增益约 620~1040 lx）；100% 会过曝。</div>
+    </div>
+
+    <div class="card">
+      <h2>③ 类别</h2>
+      <div class="cats" id="cats"></div>
+      <div class="row" style="margin-top:10px">
+        <span>本类别已采 <b id="cnt">0</b> 张</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>④ 采集</h2>
+      <button class="big" id="btnShot">📷 拍一张（按 <span class="kbd">回车</span>）</button>
+      <div class="hint" style="margin-top:8px">
+        流程：放好标签 → 按回车（或点上面按钮）→ 自动等照度稳定 → 抓帧 → 保存 → 计数 +1
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+
+    <div class="card">
+      <h2>日志</h2>
+      <div id="log"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnClear">清空日志</button>
+        <span class="hint">Ctrl+C 关不掉这个页面 —— 直接关标签页即可</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 右栏 ================= -->
+  <div>
+    <div class="card">
+      <h2>实时预览</h2>
+      <video id="video" playsinline autoplay muted></video>
+      <div class="hint" style="margin-top:8px">
+        预览就是"最终存下来的画面"。拍之前先看：<b>标签完整、居中、文字清晰、不过曝</b>。
+      </div>
+    </div>
+    <div class="card">
+      <h2>使用前检查（三个都要绿）</h2>
+      <ol class="hint" style="margin:0;padding-left:20px;line-height:1.9">
+        <li>串口已连接，且照度数字在跳动（说明 BH1750 在工作）</li>
+        <li>摄像头已打开，画面里能看到箱子内部</li>
+        <li>保存目录已选择（选 dataset 文件夹）</li>
+      </ol>
+      <div class="hint" style="margin-top:10px">
+        ⚠️ 采集期间不要打开 Windows「相机」应用 / 微信视频，否则摄像头被占用、页面抓不到画面。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ============ 类别定义（与 make_labels.ps1 的 $kinds 一致）============
+const CATS = [
+  { k:'normal',     t:'正常',    d:'合格品' },
+  { k:'brokenline', t:'断线',    d:'外框缺一段' },
+  { k:'faint',      t:'缺墨',    d:'条码变浅' },
+  { k:'stain',      t:'污点',    d:'黑斑' },
+  { k:'scratch',    t:'划痕',    d:'白色划痕' },
+  { k:'offset',     t:'偏重影',  d:'整体偏移重印' }
+];
+
+const $ = (id) => document.getElementById(id);
+let curCat = 'normal';
+
+function log(msg, cls) {
+  const el = $('log');
+  const t = new Date().toLocaleTimeString('zh-CN', { hour12:false });
+  el.textContent += `[${t}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+// ==================== ① 串口（Web Serial）====================
+let port = null, writer = null, reader = null, rxBuf = '', serialOk = false;
+
+async function connectSerial() {
+  if (!('serial' in navigator)) {
+    log('这个浏览器不支持 Web Serial，请用 Chrome 或 Edge', 'bad');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    // ★ 关键：放开 DTR/RTS，否则某些板子会被一直按在复位状态
+    try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) {}
+    writer = port.writable.getWriter();
+    serialOk = true;
+    $('stSerial').textContent = '已连接';
+    $('stSerial').className = 'st ok';
+    $('btnSerial').disabled = true;
+    log('串口已连接（115200）');
+    readLoop();
+    await new Promise(r => setTimeout(r, 1500));
+    await applyBrightness();
+    startLuxPoll();
+  } catch (e) {
+    log('串口连接失败：' + e.message, 'bad');
+  }
+}
+
+async function readLoop() {
+  const dec = new TextDecoder();
+  try {
+    reader = port.readable.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) rxBuf += dec.decode(value, { stream: true });
+      if (rxBuf.length > 4000) rxBuf = rxBuf.slice(-2000);
+    }
+  } catch (e) {
+    if (serialOk) log('串口读取中断：' + e.message, 'bad');
+  } finally {
+    try { reader.releaseLock(); } catch (e) {}
+  }
+}
+
+function sendCmd(cmd) {
+  if (!writer) return;
+  writer.write(new TextEncoder().encode(cmd + '\n')).catch(e => log('串口写入失败：' + e.message, 'bad'));
+}
+
+// 发命令并等一行 JSON 回来（最多等 1.5 秒）
+function cmdWait(cmd, timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    rxBuf = '';
+    sendCmd(cmd);
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      const m = rxBuf.match(/\{[^\n]*\}/);
+      if (m) { clearInterval(timer); resolve(m[0]); return; }
+      if (Date.now() - t0 > timeoutMs) { clearInterval(timer); resolve(null); }
+    }, 60);
+  });
+}
+
+async function applyBrightness() {
+  const v = Math.max(0, Math.min(100, parseInt($('bright').value || '0', 10)));
+  const r = await cmdWait('LIGHT ' + v);
+  if (r) { log('亮度已设为 ' + v + '%'); $('curBright').textContent = '当前 ' + v + '%'; }
+  else   { log('亮度设置无回应（检查串口）', 'bad'); }
+}
+
+// ==================== 照度轮询 + 稳定性判断 ====================
+let luxHist = [];
+let busy = false;                 // 拍照期间挂起后台轮询，避免两条命令抢串口缓冲
+let lastLux = -1, lastBright = -1;
+
+async function pollLuxOnce() {
+  if (!serialOk) return;
+  const r = await cmdWait('STATUS', 1200);
+  if (!r) { $('luxSt').textContent = '串口无回应'; $('luxSt').className = 'st bad'; return; }
+  const m = r.match(/"lux":\s*([0-9.]+)/);
+  const b = r.match(/"brightness":\s*([0-9]+)/);
+  if (!m) return;
+  const lux = parseFloat(m[1]);
+  lastLux = lux;
+  if (b) lastBright = parseInt(b[1], 10);
+  $('lux').textContent = lux.toFixed(1) + ' lx';
+  if (b) $('curBright').textContent = '当前 ' + b[1] + '%';
+
+  luxHist.push(lux);
+  if (luxHist.length > 5) luxHist.shift();
+
+  const steady = isSteady();
+  $('lux').className = 'lux ' + (steady ? 'steady' : 'unsteady');
+  if (lux < 150)      { $('luxSt').textContent = '照度偏低（画面会暗）'; $('luxSt').className = 'st bad'; }
+  else if (lux > 1100) { $('luxSt').textContent = '照度偏高（超出 900±30 验收带，可能过曝）'; $('luxSt').className = 'st bad'; }
+  else if (steady)    { $('luxSt').textContent = '照度稳定 ● '; $('luxSt').className = 'st ok'; }
+  else                { $('luxSt').textContent = '照度在变化… '; $('luxSt').className = 'st no'; }
+}
+
+function isSteady() {
+  if (luxHist.length < 3) return false;
+  const a = luxHist.slice(-3);
+  const mn = Math.min(...a), mx = Math.max(...a);
+  if (mn <= 0) return false;
+  return (mx - mn) / mn < 0.02;      // 三次读数差异 < 2%
+}
+
+function startLuxPoll() {
+  if (startLuxPoll.t) clearInterval(startLuxPoll.t);
+  startLuxPoll.t = setInterval(() => { if (!busy && serialOk) pollLuxOnce(); }, 600);
+}
+
+// ==================== ② 摄像头 ====================
+let stream = null, curDeviceId = null;
+
+async function listCams() {
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  const cams = devs.filter(d => d.kind === 'videoinput');
+  const sel = $('camList');
+  sel.innerHTML = '';
+  cams.forEach((c, i) => {
+    const o = document.createElement('option');
+    o.value = c.deviceId;
+    o.textContent = (c.label || ('摄像头 ' + (i + 1)));
+    sel.appendChild(o);
+  });
+  // 优先选名字里带 USB / 外接 的
+  const usb = cams.find(c => /USB|外接|USB Camera/i.test(c.label));
+  if (usb) sel.value = usb.deviceId;
+  return cams;
+}
+
+async function openCam(deviceId) {
+  try {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    const constraints = { video: deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      : { width: { ideal: 1920 }, height: { ideal: 1080 } } };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    $('video').srcObject = stream;
+    await $('video').play().catch(() => {});
+    const tr = stream.getVideoTracks()[0];
+    const s = tr.getSettings();
+    $('stCam').textContent = `已打开 ${s.width}x${s.height}`;
+    $('stCam').className = 'st ok';
+    log(`摄像头已打开：${tr.label} (${s.width}x${s.height})`);
+    await listCams();
+  } catch (e) {
+    log('打开摄像头失败：' + e.message + '（检查是否被"相机"应用占用）', 'bad');
+  }
+}
+
+// ==================== ③ 保存目录（File System Access）====================
+let rootDir = null, csvRows = [];
+
+async function pickDir() {
+  if (!window.showDirectoryPicker) {
+    log('这个浏览器不支持目录写入，请用 Chrome / Edge', 'bad'); return;
+  }
+  try {
+    rootDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    $('stDir').textContent = '已选择：' + rootDir.name;
+    $('stDir').className = 'st ok';
+    log('保存目录已选择：' + rootDir.name);
+    await loadCsv();
+    await refreshCount();
+  } catch (e) {
+    if (e.name !== 'AbortError') log('选择目录失败：' + e.message, 'bad');
+  }
+}
+
+async function loadCsv() {
+  csvRows = [];
+  try {
+    const fh = await rootDir.getFileHandle('采集记录表.csv');
+    const f = await fh.getFile();
+    const txt = await f.text();
+    csvRows = txt.split(/\r?\n/).filter(l => l.trim().length > 0);
+    log(`已读取现有记录表：${csvRows.length} 行`);
+  } catch (e) {
+    csvRows = ['文件名,类别,缺陷类型,照度lx,亮度%,时间'];
+  }
+}
+
+async function saveCsv() {
+  const fh = await rootDir.getFileHandle('采集记录表.csv', { create: true });
+  const w = await fh.createWritable();
+  // 加 BOM，Excel 双击打开不乱码
+  await w.write(new Blob(['\uFEFF' + csvRows.join('\r\n') + '\r\n'], { type: 'text/csv' }));
+  await w.close();
+}
+
+async function classDir(cat, create) {
+  const imgs = await rootDir.getDirectoryHandle('images', { create: true });
+  return imgs.getDirectoryHandle(cat, { create: true });
+}
+
+async function refreshCount() {
+  if (!rootDir) return;
+  try {
+    const d = await classDir(curCat, true);
+    let n = 0;
+    for await (const [name, h] of d.entries()) { if (h.kind === 'file' && /\.jpg$/i.test(name)) n++; }
+    $('cnt').textContent = n;
+  } catch (e) { log('统计张数失败：' + e.message, 'bad'); }
+}
+
+// ==================== ④ 拍照 ====================
+async function shoot() {
+  if (!stream)     { log('摄像头还没打开', 'bad'); return; }
+  if (!rootDir)    { log('还没选择保存目录', 'bad'); return; }
+  if (!serialOk)   { log('串口还没连接（照度无法记录）', 'bad'); return; }
+
+  $('btnShot').disabled = true;
+  busy = true;                       // 挂起后台轮询，接下来自己采样
+  try {
+    // 等照度稳定（最多采 5 次；期间由本流程独占串口，避免抢缓冲）
+    if ($('waitSteady').checked) {
+      let steady = isSteady();
+      for (let i = 0; i < 5 && !steady; i++) {
+        await new Promise(r => setTimeout(r, 250));
+        await pollLuxOnce();
+        steady = isSteady();
+      }
+      if (!steady) log('照度采样 5 次仍未稳定，仍按当前值拍照', 'warn');
+    } else {
+      await pollLuxOnce();
+    }
+    const lux = lastLux, bright = lastBright;
+
+    // 抓帧
+    const v = $('video');
+    const w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) { log('画面还没准备好，稍等一下再拍', 'bad'); return; }
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(v, 0, 0, w, h);
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.95));
+    if (!blob) { log('抓帧失败', 'bad'); return; }
+
+    // 命名：类别_序号4位.jpg（序号接着已有的往下排）
+    const d = await classDir(curCat, true);
+    let n = 0;
+    for await (const [name, hh] of d.entries()) { if (hh.kind === 'file' && /\.jpg$/i.test(name)) n++; }
+    n++;
+    const fname = `${curCat}_${String(n).padStart(4, '0')}.jpg`;
+
+    const fh = await d.getFileHandle(fname, { create: true });
+    const wr = await fh.createWritable();
+    await wr.write(blob);
+    await wr.close();
+
+    // 记录 CSV
+    const defect = curCat === 'normal' ? '无' : curCat;
+    const now = new Date();
+    const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ` +
+               `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    csvRows.push(`${fname},${curCat},${defect},${lux},${bright},${ts}`);
+    await saveCsv();
+
+    $('cnt').textContent = n;
+    log(`✔ ${fname}  (${lux} lx, 亮度 ${bright}%)`);
+
+    // 缩略图
+    const url = URL.createObjectURL(blob);
+    const img = document.createElement('img');
+    img.src = url; img.title = fname;
+    const tb = $('thumbs');
+    tb.insertBefore(img, tb.firstChild);
+    while (tb.children.length > 8) { URL.revokeObjectURL(tb.lastChild.src); tb.removeChild(tb.lastChild); }
+  } catch (e) {
+    log('拍照出错：' + e.message, 'bad');
+  } finally {
+    busy = false;                    // 恢复后台轮询
+    $('btnShot').disabled = false;
+  }
+}
+
+// ==================== 初始化界面 ====================
+function buildCats() {
+  const box = $('cats');
+  CATS.forEach(c => {
+    const b = document.createElement('button');
+    b.className = 'cat' + (c.k === curCat ? ' sel' : '');
+    b.innerHTML = `<b>${c.t}</b><span>${c.k} · ${c.d}</span>`;
+    b.onclick = async () => {
+      curCat = c.k;
+      [...box.children].forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel');
+      log('当前类别：' + c.t + '（' + c.k + '）');
+      await refreshCount();
+    };
+    box.appendChild(b);
+  });
+}
+
+$('btnSerial').onclick = connectSerial;
+$('btnCam').onclick    = async () => { await openCam($('camList').value || null); };
+$('btnCamPick').onclick= async () => { await openCam($('camList').value || null); };
+$('btnDir').onclick    = pickDir;
+$('btnBright').onclick = applyBrightness;
+$('btnShot').onclick   = shoot;
+$('btnClear').onclick  = () => { $('log').textContent = ''; };
+
+// 回车 = 拍一张（输入框里按回车不触发）
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+    e.preventDefault();
+    if (!$('btnShot').disabled) shoot();
+  }
+});
+
+window.addEventListener('load', async () => {
+  buildCats();
+  log('采集台就绪。请依次：连接串口 → 打开摄像头 → 选择保存目录');
+  try { await listCams(); } catch (e) {}
+  if (!('serial' in navigator)) log('注意：当前浏览器不支持 Web Serial，请改用 Chrome / Edge', 'bad');
+  if (!window.showDirectoryPicker) log('注意：当前浏览器不支持目录写入，请改用 Chrome / Edge', 'bad');
+});
+</script>
+</body>
+</html>
