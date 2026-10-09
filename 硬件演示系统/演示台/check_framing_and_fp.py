@@ -60,6 +60,29 @@ def grab(tag: str) -> str | None:
     return os.path.join(TMP, files[-1]) if files else None
 
 
+def grab_settled(tag: str, max_tries: int = 6, tol: float = 5.0) -> str | None:
+    """抓帧直到**相机自动曝光真的收敛**：连续两帧的整幅均值差 ≤ tol 灰阶才算稳。
+
+    为什么不能"死等 N 秒"：实测同一档位在不同等待时间下结论相反
+    （等 7 秒时 A 帧均值 103、B 帧 148，差 45 灰阶 —— 拿这种帧算光照均匀度完全不成立）。
+    """
+    prev_mean, prev_path = None, None
+    for i in range(1, max_tries + 1):
+        path = grab("%s%d" % (tag, i))
+        if not path:
+            return None
+        im = Image.open(path)
+        mean = float(np.asarray(im.convert("L"), dtype=np.float32).mean())
+        print("     抓帧 %s%d：均值 %.1f%s"
+              % (tag, i, mean, "（与上帧差 %.1f，未收敛）" % abs(mean - (prev_mean or 0))
+                 if prev_mean is not None and abs(mean - prev_mean) > tol else ""))
+        if prev_mean is not None and abs(mean - prev_mean) <= tol:
+            return path                       # 连续两帧一致 → 认为收敛，用最新这帧
+        prev_mean, prev_path = mean, path
+        time.sleep(2.5)
+    return prev_path                          # 到次数上限就用最后一帧，并在报告里注明
+
+
 def analyse(path: str) -> dict:
     im = Image.open(path)
     g = np.asarray(im.convert("L"), dtype=np.float32)
@@ -109,21 +132,55 @@ def framing(path: str) -> dict:
                 "aspect": round(ar, 2)}
         (clipped if touch else labels).append(item)
 
-    # 光照均匀性（四象限 + 左右）
+    # 光照均匀性（四象限 + 3×3 九宫格 + 左右/上下）
     h2, w2 = H // 2, W // 2
     quad = {
         "左上": float(img[:h2, :w2].mean()), "右上": float(img[:h2, w2:].mean()),
         "左下": float(img[h2:, :w2].mean()), "右下": float(img[h2:, w2:].mean()),
     }
     left, right = float(img[:, :w2].mean()), float(img[:, w2:].mean())
+    top, bottom = float(img[:h2, :].mean()), float(img[h2:, :].mean())
+    grid = []
+    for r in range(3):
+        row = []
+        for c in range(3):
+            blk = img[r * H // 3:(r + 1) * H // 3, c * W // 3:(c + 1) * W // 3]
+            row.append(round(float(blk.mean()), 1))
+        grid.append(row)
+    flat = [(grid[r][c], r, c) for r in range(3) for c in range(3)]
+    brightest = max(flat)
+    darkest = min(flat)
+    names = [["左上", "中上", "右上"], ["左中", "正中", "右中"], ["左下", "中下", "右下"]]
+
+    # ★ 只统计"纸面"（亮像素）的左右梯度 —— 整幅会把左侧的桌面算进去，把差值放大。
+    #   实测：整幅左右差 79.6，纸面实际只有 45.4；用整幅会让人以为问题比实际严重。
+    paper = img > 120
+    paper_lr = None
+    if paper.mean() > 0.05:
+        cols = paper.sum(axis=0)
+        xs = np.where(cols > 20)[0]
+        if len(xs) > 60:
+            x0, x1 = int(xs[0]), int(xs[-1])
+            seg = max(1, (x1 - x0) // 3)
+            lm = img[:, x0:x0 + seg][paper[:, x0:x0 + seg]].mean()
+            rm = img[:, x0 + 2 * seg:x1][paper[:, x0 + 2 * seg:x1]].mean()
+            paper_lr = {"x0": x0, "x1": x1, "left": round(float(lm), 1), "right": round(float(rm), 1),
+                        "diff": round(float(rm - lm), 1),
+                        "touches_right_edge": x1 >= W - 5,
+                        "touches_left_edge": x0 <= 5}
     return {
         "found": bool(labels or clipped),
         "complete": len(labels),
         "clipped": len(clipped),
         "biggest": max(labels, key=lambda d: d["area_pct"]) if labels else None,
         "quad": {k: round(v, 1) for k, v in quad.items()},
+        "grid": grid,
         "lr_diff": round(right - left, 1),
-        "uneven": abs(right - left) > 25,
+        "tb_diff": round(bottom - top, 1),
+        "paper_lr": paper_lr,
+        "brightest": "%s %.1f" % (names[brightest[1]][brightest[2]], brightest[0]),
+        "darkest": "%s %.1f" % (names[darkest[1]][darkest[2]], darkest[0]),
+        "uneven": bool(paper_lr and abs(paper_lr["diff"]) > 25),
     }
 
 
@@ -136,16 +193,14 @@ def main() -> int:
     print("=" * 70)
     try:
         st = cmd(ser, "LIGHT %d" % LEVEL, 2.0)
-        print("  灯带: 回读亮度 %s%%，照度等待中…" % (st or {}).get("brightness"))
-        time.sleep(SETTLE)
-        cur = cmd(ser, "STATUS")
-        print("  稳定后照度: %s lx" % (cur or {}).get("lux"))
-
-        a = grab("A")
+        print("  灯带: 回读亮度 %s%%，等相机自动曝光收敛…" % (st or {}).get("brightness"))
+        a = grab_settled("A")
         if not a:
             print("  [x] 抓帧失败（相机被占用？）")
             return 1
-        time.sleep(3.0)                      # 让自动曝光再稳一会儿
+        cur = cmd(ser, "STATUS")
+        print("  收敛后照度: %s lx" % (cur or {}).get("lux"))
+        time.sleep(1.5)
         b = grab("B")
         if not b:
             print("  [x] 第二次抓帧失败")
@@ -155,6 +210,9 @@ def main() -> int:
         print("-" * 70)
         print("  A 帧：%s  均值 %s  过曝 %.1f%%  清晰度 %s" % (ia["size"], ia["mean"], ia["sat_ratio"] * 100, ia["sharpness"]))
         print("  B 帧：%s  均值 %s  过曝 %.1f%%  清晰度 %s" % (ib["size"], ib["mean"], ib["sat_ratio"] * 100, ib["sharpness"]))
+        if abs(ia["mean"] - ib["mean"]) > 8:
+            print("  [!] 两帧均值差 %.1f 灰阶 —— 相机还没稳（或有人/东西在动），下面的均匀度仅供参考"
+                  % abs(ia["mean"] - ib["mean"]))
         print("-" * 70)
         fr = framing(a)
         print("  【取景体检】")
@@ -168,9 +226,24 @@ def main() -> int:
                     print("      → 一张标签只占画面 %.1f%%：若想「一图一标签」，应把相机拉近/换镜头，"
                           "让标签占到 40%%~70%%；若想「一图多样品」则当前取景可用" % best["area_pct"])
             print("    四象限均值: " + "  ".join("%s %.1f" % (k, v) for k, v in fr["quad"].items()))
-            print("    左右差 %.1f 灰度 → %s" % (fr["lr_diff"],
-                  "★ 光照不均匀（>25 灰度）：左右亮度差会让「把标签放到别的位置」被误判成缺陷"
-                  if fr["uneven"] else "均匀 ✅"))
+            print("    九宫格亮度（看光从哪来）:")
+            names = [["左上", "中上", "右上"], ["左中", "正中", "右中"], ["左下", "中下", "右下"]]
+            for r in range(3):
+                print("      " + "  ".join("%s %6.1f" % (names[r][c], fr["grid"][r][c]) for c in range(3)))
+            print("    最亮: %s    最暗: %s" % (fr["brightest"], fr["darkest"]))
+            pl = fr.get("paper_lr")
+            if pl:
+                print("    ★ 只统计纸面: 左 %.1f → 右 %.1f，纸面左右差 **%.1f** 灰阶"
+                      % (pl["left"], pl["right"], pl["diff"]))
+                print("       （整幅左右差 %.1f 是把左侧桌面算进去的，偏大；以纸面为准）" % fr["lr_diff"])
+                if pl["touches_right_edge"]:
+                    print("       ⚠ 纸的右边已到画面边缘（x=%d）—— 相机太近或纸偏右，整张纸没进画面" % pl["x1"])
+                if pl["touches_left_edge"]:
+                    print("       ⚠ 纸的左边已到画面边缘（x=%d）" % pl["x0"])
+            print("    上下差 %.1f 灰度 → %s"
+                  % (fr["tb_diff"],
+                     "★ 纸面左右光照不均（>25 灰阶）：把标签换个位置放会被误判成缺陷"
+                     if fr["uneven"] else "纸面左右光照可接受 ✅"))
         else:
             print("    没找到像标签的矩形：%s" % fr.get("error", "画面里可能没有完整标签"))
 

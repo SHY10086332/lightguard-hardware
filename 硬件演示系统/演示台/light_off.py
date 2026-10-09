@@ -11,6 +11,7 @@
       py -3.11 light_off.py COM5
 """
 import json
+import os
 import sys
 import time
 
