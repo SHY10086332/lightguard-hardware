@@ -24,19 +24,31 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  let rel = decodeURIComponent(req.url.split('?')[0]);
+  let rel;
+  try {
+    rel = decodeURIComponent(req.url.split('?')[0]);
+  } catch (e) {
+    // 形如 "/%" 的非法编码会让 decodeURIComponent 抛 URIError；
+    // 不接住会直接把 Node 进程打崩（采集中断），这里按 400 处理。
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('400 bad request');
+    return;
+  }
   if (rel === '/' || rel === '') rel = '/index.html';
+  // 反斜杠统一成正斜杠，避免 Windows 上 "..\\" 绕过
+  rel = rel.replace(/\\/g, '/');
 
-  // 防目录穿越
+  // 防目录穿越：前缀比较必须带路径分隔符，否则同级的 web_evil / web2 等兄弟目录会被放行
   const target = path.normalize(path.join(ROOT, rel));
-  if (!target.startsWith(ROOT)) {
+  const within = target === ROOT || target.startsWith(ROOT + path.sep);
+  if (!within) {
     res.writeHead(403); res.end('forbidden'); return;
   }
 
   fs.readFile(target, (err, data) => {
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('404 not found: ' + rel);
+      res.end('404 not found');
       return;
     }
     res.writeHead(200, {

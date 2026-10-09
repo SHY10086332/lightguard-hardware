@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
+import threading
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -50,12 +52,17 @@ _NAME_RE = re.compile(r"^([a-z0-9]+)_(\d{4,})\.jpg$", re.IGNORECASE)
 
 
 class DatasetManager:
-    """数据集目录 + 记录表的管理器（线程安全由调用方保证；单用户本地使用足够）"""
+    """数据集目录 + 记录表的管理器。
+
+    并发说明：采集台/软件接入都可能被多线程调用（浏览器连点、定时轮询触发采集），
+    因此 save/delete_last 用同一把可重入锁串行化，保证「图片编号唯一」与「图片与记录表一致」。
+    """
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         self.images_dir = self.root / "images"
         self.csv_path = self.root / "采集记录表.csv"
+        self._lock = threading.RLock()
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_csv()
 
@@ -76,8 +83,16 @@ class DatasetManager:
         return rows
 
     def _write_rows(self, rows: List[List[str]]) -> None:
-        with open(self.csv_path, "w", encoding="utf-8-sig", newline="") as f:
+        """原子写记录表：先写临时文件再替换，避免写到一半被中断导致记录表残缺。"""
+        tmp = self.csv_path.with_name(self.csv_path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
             csv.writer(f).writerows(rows)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.csv_path)
+
+    def _csv_names(self) -> set:
+        return {r[0] for r in self._read_rows()[1:] if r}
 
     def _check_class(self, cls: str) -> str:
         cls = (cls or "").strip().lower()
@@ -92,14 +107,28 @@ class DatasetManager:
         return d
 
     def count(self, cls: str) -> int:
-        d = self.images_dir / cls
+        d = self.images_dir / self._check_class(cls)
         if not d.is_dir():
             return 0
         return sum(1 for p in d.iterdir() if p.is_file() and p.suffix.lower() == ".jpg")
 
     def next_index(self, cls: str) -> int:
-        """下一个序号 = 当前已有张数 + 1（序号会接着已有的往下排）"""
-        return self.count(cls) + 1
+        """下一个可用序号：跳过磁盘上已存在的编号，也跳过记录表里出现过的编号。
+
+        原实现用「已有张数 + 1」，在下列情况会与已有文件重号并**静默覆盖**：
+          · 两张几乎同时保存（浏览器连点、脚本与网页同时用）；
+          · 手工删掉中间的图片后，张数变小但编号已被占用。
+        """
+        cls = self._check_class(cls)
+        used = self._csv_names()
+        d = self.images_dir / cls
+        existing = {p.name for p in d.iterdir() if p.is_file()} if d.is_dir() else set()
+        idx = 1
+        while True:
+            name = f"{cls}_{idx:04d}.jpg"
+            if name not in existing and name not in used:
+                return idx
+            idx += 1
 
     def save(
         self,
@@ -108,63 +137,98 @@ class DatasetManager:
         lux: Optional[float] = None,
         brightness: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """保存一张样本：写图片 + 追加一行记录"""
+        """保存一张样本：写图片 + 追加一行记录
+
+        一致性保证：
+          1. 全程持锁串行化，避免并发下拿到同一个序号；
+          2. 图片用 O_CREAT|O_EXCL 创建，物理上不可能覆盖已有文件；
+          3. 记录表写入失败时**回滚已经落盘的图片**，避免"有图无记录"的静默不一致。
+        """
         cls = self._check_class(cls)
         if not image_bytes:
             raise ValueError("图片内容为空")
 
-        idx = self.next_index(cls)
-        name = f"{cls}_{idx:04d}.jpg"
-        path = self.class_dir(cls) / name
-        path.write_bytes(image_bytes)
+        with self._lock:
+            d = self.class_dir(cls)
+            # 分配唯一序号 + 独占创建（极端情况下被抢号则重试）
+            for _ in range(50):
+                idx = self.next_index(cls)
+                name = f"{cls}_{idx:04d}.jpg"
+                path = d / name
+                try:
+                    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o644)
+                except FileExistsError:
+                    continue
+                try:
+                    with os.fdopen(fd, "wb") as fh:
+                        fh.write(image_bytes)
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    raise
+                break
+            else:
+                raise RuntimeError("无法分配唯一的样本编号，请检查数据集目录")
 
-        # 缺陷类型用中文（和「无」同一语言，Excel 里直接看得懂）；类别列仍是英文 key，与目录名一致
-        defect = "无" if cls == "normal" else CLASS_LABELS[cls]
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        rows = self._read_rows()
-        rows.append([
-            name, cls, defect,
-            "" if lux is None else f"{float(lux):.1f}",
-            "" if brightness is None else str(int(brightness)),
-            ts,
-        ])
-        self._write_rows(rows)
+            # 缺陷类型用中文（和「无」同一语言，Excel 里直接看得懂）；类别列仍是英文 key，与目录名一致
+            defect = "无" if cls == "normal" else CLASS_LABELS[cls]
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rows = self._read_rows()
+            rows.append([
+                name, cls, defect,
+                "" if lux is None else f"{float(lux):.1f}",
+                "" if brightness is None else str(int(brightness)),
+                ts,
+            ])
+            try:
+                self._write_rows(rows)
+            except Exception:
+                # 记录表没写成功 → 删掉刚落的图，保持"图-表一致"
+                path.unlink(missing_ok=True)
+                raise
 
-        return {
-            "ok": True,
-            "file": name,
-            "class": cls,
-            "class_label": CLASS_LABELS[cls],
-            "index": idx,
-            "count": self.count(cls),
-            "lux": None if lux is None else round(float(lux), 1),
-            "brightness": brightness,
-            "time": ts,
-        }
+            return {
+                "ok": True,
+                "file": name,
+                "class": cls,
+                "class_label": CLASS_LABELS[cls],
+                "index": idx,
+                "count": self.count(cls),
+                "lux": None if lux is None else round(float(lux), 1),
+                "brightness": brightness,
+                "time": ts,
+            }
 
     def delete_last(self, cls: str) -> Dict[str, Any]:
-        """撤销上一张（放错标签、拍糊了时用）"""
+        """撤销上一张（放错标签、拍糊了时用）
+
+        先原子删记录表那一行，再删图片；删图片失败时把记录行补回去，保持图-表一致。
+        """
         cls = self._check_class(cls)
-        d = self.images_dir / cls
-        if not d.is_dir():
-            return {"ok": False, "error": "该类别还没有样本"}
+        with self._lock:
+            d = self.images_dir / cls
+            if not d.is_dir():
+                return {"ok": False, "error": "该类别还没有样本"}
 
-        files = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() == ".jpg"]
-        if not files:
-            return {"ok": False, "error": "该类别还没有样本"}
+            files = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() == ".jpg"]
+            if not files:
+                return {"ok": False, "error": "该类别还没有样本"}
 
-        def seq(p: Path) -> int:
-            m = _NAME_RE.match(p.name)
-            return int(m.group(2)) if m else 0
+            def seq(p: Path) -> int:
+                m = _NAME_RE.match(p.name)
+                return int(m.group(2)) if m else 0
 
-        victim = max(files, key=seq)
-        victim.unlink()
+            victim = max(files, key=seq)
 
-        rows = self._read_rows()
-        rows = [r for r in rows if not (len(r) >= 1 and r[0] == victim.name)]
-        self._write_rows(rows)
+            rows = self._read_rows()
+            kept = [r for r in rows if not (len(r) >= 1 and r[0] == victim.name)]
+            self._write_rows(kept)
+            try:
+                victim.unlink()
+            except OSError:
+                self._write_rows(rows)      # 回滚记录表
+                raise
 
-        return {"ok": True, "deleted": victim.name, "count": self.count(cls)}
+            return {"ok": True, "deleted": victim.name, "count": self.count(cls)}
 
     def status(self) -> Dict[str, Any]:
         """各类别数量 + 总数 + 最近一张的信息"""
