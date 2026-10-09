@@ -69,6 +69,7 @@
   <span class="tag" id="hw-tag">硬件：连接中…</span>
   <span class="tag" id="loop-tag">稳光：空闲</span>
   <span class="grow"></span>
+  <button id="btn-selftest">自检</button>
   <button id="btn-off" class="bad">关灯 (LIGHT 0)</button>
   <button id="btn-idle">复位指示</button>
 </header>
@@ -170,6 +171,13 @@
     el.textContent = text;
     clearTimeout(msgTimer);
     msgTimer = setTimeout(() => el.classList.remove('show'), 4500);
+  }
+  function sayHtml(html, kind = 'info', ms = 13000) {
+    const el = $('msg');
+    el.className = 'msg show ' + kind;
+    el.innerHTML = html;
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => el.classList.remove('show'), ms);
   }
 
   function setVerdict(text, cls) {
@@ -357,6 +365,16 @@
   $('btn-shot').onclick = shoot;
   $('btn-ref').onclick = setReference;
   $('btn-ref-clear').onclick = async () => { await post('/api/reference/clear'); say('参考图已清除', 'info'); poll(); };
+  $('btn-selftest').onclick = async () => {
+    try {
+      const r = await (await fetch('/api/selftest')).json();
+      const lines = (r.checks || []).map((c) =>
+        (c.ok ? '✅' : '❌') + ' ' + c.name + '：' + (c.detail || '')).join('<br>');
+      sayHtml('<b>' + (r.ok ? '自检通过，可以开始演示' : '自检发现问题，见下面标 ❌ 的项') + '</b><br>' + lines,
+              r.ok ? 'ok' : 'err');
+      poll();
+    } catch (e) { say('自检失败：' + e.message, 'err'); }
+  };
   $('btn-off').onclick = async () => {
     const r = await post('/api/light', { brightness: 0 });
     say(r.ok ? '灯带已关' : ('关灯失败：' + r.error), r.ok ? 'info' : 'err'); poll();

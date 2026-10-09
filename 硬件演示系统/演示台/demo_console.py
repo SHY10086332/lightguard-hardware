@@ -322,6 +322,41 @@ def api_diff():
     return send_file(path, mimetype="image/jpeg")
 
 
+@app.route("/api/selftest")
+def api_selftest():
+    """演示前一键自检：串口 / 照度 / 灯带可控 / 参考图 / 输出目录 / 阈值。
+
+    只往 0% 调（不会把灯点亮），并且**回读**确认，不靠软件自称。
+    """
+    checks = []
+    hw = HW.status()
+    checks.append({"name": "串口连接", "ok": bool(hw.get("connected")),
+                   "detail": hw.get("port") or (hw.get("error") or "未连接")})
+    lux = hw.get("lux")
+    checks.append({"name": "读取照度", "ok": lux is not None,
+                   "detail": ("%.1f lx" % float(lux)) if lux is not None else "读不到（接线或串口问题）"})
+    st = HW.set_light(0)
+    ok_light = bool(st.get("connected")) and st.get("brightness") == 0
+    checks.append({"name": "灯带可控（已关灯）", "ok": ok_light,
+                   "detail": "发出 LIGHT 0，回读亮度 %s%%" % st.get("brightness")})
+    checks.append({"name": "参考图", "ok": DET.has_reference(),
+                   "detail": ("已设 %sx%s" % DET.ref_size) if DET.ref_size else "未设置（演示第 1 步再设）"})
+    try:
+        probe = os.path.join(OUT, ".write_test")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        writable, wdetail = True, OUT
+    except Exception as exc:
+        writable, wdetail = False, "不可写：%s" % exc
+    checks.append({"name": "输出目录可写", "ok": writable, "detail": wdetail})
+    checks.append({"name": "判定阈值", "ok": 0 < DET.threshold <= 100,
+                   "detail": "%s%%（差异占比超过它判异常）" % DET.threshold})
+    # 参考图不参与总体结论：演示第一步就是要设它
+    hard = [c for c in checks if c["name"] != "参考图"]
+    return jsonify({"ok": all(c["ok"] for c in hard), "checks": checks})
+
+
 @app.route("/api/log")
 def api_log():
     try:
