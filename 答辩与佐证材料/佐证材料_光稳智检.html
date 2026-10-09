@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>光稳智检 · 佐证材料</title>
+<style>
+  @page { size: A4; margin: 14mm 13mm 12mm 13mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 10.5pt; color: #16202e;
+         line-height: 1.6; }
+  h1 { font-size: 22pt; color: #1d3a6e; border-bottom: 3px solid #2f6fed; padding-bottom: 3mm; }
+  h2 { font-size: 14pt; color: #1d3a6e; border-left: 6px solid #2f6fed; padding-left: 4mm;
+       margin: 7mm 0 3mm; }
+  h3 { font-size: 11.5pt; color: #2f6fed; margin: 4mm 0 2mm; }
+  table { border-collapse: collapse; width: 100%; margin: 2mm 0 3mm; page-break-inside: avoid; }
+  th, td { border: 1px solid #9fb0c9; padding: 1.8mm 2.5mm; font-size: 9.5pt; vertical-align: top; }
+  th { background: #eaf1fd; color: #1d3a6e; }
+  ul, ol { margin-left: 6mm; } li { margin: 1mm 0; }
+  .two { display: flex; gap: 5mm; page-break-inside: avoid; }
+  .two > div { flex: 1; }
+  img { width: 100%; border: 1px solid #c8d3e4; border-radius: 2mm; }
+  .cap { font-size: 9pt; color: #6b7686; text-align: center; margin-top: 1mm; }
+  .todo { background: #fff8e6; border: 1px dashed #e0a800; border-radius: 2mm; padding: 3mm 4mm;
+          font-size: 9.5pt; color: #7a5b00; }
+  .ok { color: #0d6b3f; font-weight: 600; }
+  .note { font-size: 9pt; color: #6b7686; }
+  code { background: #f2f4f8; padding: 0 2px; border-radius: 2px; font-family: Consolas, monospace;
+         font-size: 9pt; }
+</style>
+</head>
+<body>
+
+<h1>光稳智检 · 佐证材料</h1>
+<p class="note">
+材料构成：① 硬件实测记录摘录 ② 软件与硬件界面截图 ③ 数据集设计与统计 ④ 工具链与自测
+⑤ 开源仓库 ⑥ 素材许可与原创说明。所有数据均来自本项目实测记录，可现场复现。
+（本页及后续页面均为匿名版：不含学校、指导教师、团队成员姓名及个人账号）
+</p>
+
+<h2>一、硬件实测记录摘录（原始记录见仓库 <code>04_硬件验证记录/hardware-test-log.md</code>）</h2>
+<table>
+  <tr><th>项目</th><th>实测结果</th><th>记录位置</th></tr>
+  <tr><td>主控与串口识别</td><td>ESP32-D0WD-V3（rev v3.1，双核 240 MHz，4 MB Flash）；CP210x → COM5</td><td>§2.1 / §2.2</td></tr>
+  <tr><td>烧录校验</td><td>4 个镜像全部 <code>Hash of data verified</code></td><td>§2.4</td></tr>
+  <tr><td>BH1750 照度读取</td><td>I2C 0x23 识别成功；读数 0 ~ 1442 lx 动态响应正常</td><td>§2.7</td></tr>
+  <tr><td>灯带 PWM 调光</td><td>亮度随指令线性变化，0%→0 lx、25%→224 lx、100%→966 lx</td><td>§2.10 / §2.16.1</td></tr>
+  <tr><td><b>照度闭环（上位机）</b></td><td>目标 300±20 lx：25%(223.3 lx) → 31%(<b>283.3 lx</b>)，<b>9.1 秒收敛</b></td><td>§2.16.2</td></tr>
+  <tr><td><b>判定 + 硬件反馈</b></td><td>6 种真实标签图案 <b>6/6 判对</b>，每次判定都改变了硬件红绿指示</td><td>§2.16.3 / §2.17.1</td></tr>
+  <tr><td><b>PWM 频闪复测</b></td><td>1 kHz 时行 σ 8.85/8.78/8.80 → 8 kHz 时 <b>0.50~0.94</b>（同方法同亮度）</td><td>§2.18</td></tr>
+  <tr><td>真实相机帧误报</td><td>同场景两帧互比：差异 <b>0.000%</b>、相似度 99.51%（阈值 0.25%）</td><td>§2.19.1</td></tr>
+  <tr><td>相机工作区间</td><td>20%~30% 不过曝（纸面亮度 215、对比度 170、过曝像素 0.00%）</td><td>§2.19.2</td></tr>
+  <tr><td>复位安全</td><td>固件默认亮度改为 <b>0%</b> 并烧录验证：复位后回读 0%</td><td>§2.16.5</td></tr>
+</table>
+
+<h2>二、界面与实物截图</h2>
+<div class="two">
+  <div><img src="shot_console.png" alt="数据集采集台"><div class="cap">图 1　数据集采集台：一图一标签自动裁切 + 只保留完整标签 + 照度实时显示（照度 222.5 lx 为真实硬件读数）</div></div>
+  <div><img src="shot_demo.png" alt="硬件演示台"><div class="cap">图 2　硬件演示台：闭环稳光（照度 222.5 lx / 亮度 25%）+ 拍照判定 + 参考图已设 709×472</div></div>
+</div>
+
+<h3>标签设计图（自研生成）</h3>
+<div class="two">
+  <div><img src="label_normal.png" alt="合格品标签"><div class="cap">图 3　合格品标签（60×40 mm，含标题、型号、批次、方块阵列、条码、编号）</div></div>
+  <div><img src="label_scratch.png" alt="划痕缺陷标签"><div class="cap">图 4　划痕缺陷标签（0.9 mm 宽刮痕，人眼可见）</div></div>
+</div>
+
+<div class="todo" style="margin-top:5mm">
+  <b>待补充（需团队拍摄实物照片）：</b>纸箱检测箱整体照、ESP32 + BH1750 + MOS + 灯带接线特写、
+  红绿灯与蜂鸣器工作瞬间、打印好的 A4 标签纸与 100 mm 校验尺实拍。这些照片请按
+  《现场演示检查单》开机后拍摄，注意画面内不要出现个人信息。
+</div>
+
+<h2>三、数据集设计与统计</h2>
+<div class="two">
+  <div>
+    <table>
+      <tr><th>项</th><th>规格</th></tr>
+      <tr><td>标签尺寸</td><td>60 × 40 mm，A4 每页 18 个</td></tr>
+      <tr><td>页脚校验</td><td>100 mm 校验尺（生成侧实测 100.41 mm）</td></tr>
+      <tr><td>类别</td><td>正常 + 断线 / 缺墨 / 污点 / 划痕 / 偏位重影（共 6 类）</td></tr>
+      <tr><td>采集方式</td><td>一图一标签自动裁切，仅保留完整标签</td></tr>
+      <tr><td>记录字段</td><td>文件名 / 类别 / 缺陷类型 / 照度 lx / 亮度 % / 时间</td></tr>
+    </table>
+  </div>
+  <div>
+    <table>
+      <tr><th>训练目录映射</th><th>比例</th></tr>
+      <tr><td>normal → train/good : calibration/good : test/good</td><td><b>6 : 2 : 2</b></td></tr>
+      <tr><td>5 类缺陷 → calibration/defect : test/defect</td><td><b>1 : 2</b></td></tr>
+      <tr><td colspan="2">硬规则：<b>按样品划分</b>（同一张纸的多张图不拆散）；<b>缺陷图绝不进 train/good</b></td></tr>
+      <tr><td colspan="2">划分脚本自测（160 张 / 55 样品组）：36 / 12 / 12 与 34 / 66，两条断言 <span class="ok">均通过</span></td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>四、工具链与自测结果</h2>
+<table>
+  <tr><th>工具</th><th>作用</th><th>自测</th></tr>
+  <tr><td><code>dataset_manager.py</code></td><td>存图 + 记 CSV + 打包 zip</td><td>34 项断言 <span class="ok">通过</span></td></tr>
+  <tr><td><code>label_crop.py</code></td><td>一图一标签自动裁切（只留完整标签、可只保留指定列）</td><td>17 项断言 <span class="ok">通过</span></td></tr>
+  <tr><td><code>detect_ref.py</code></td><td>参考图比对判定（对齐 + 亮度归一化 + 边缘屏蔽）</td><td>10 项断言 <span class="ok">通过</span></td></tr>
+  <tr><td><code>split_dataset.py</code></td><td>按样品划分数据集 + 出统计报告</td><td>合成数据 <span class="ok">通过</span></td></tr>
+  <tr><td><code>banding_check.py</code> / <code>calibrate_lux.py</code></td><td>频闪复测 / 照度标定（出报告）</td><td>真机 <span class="ok">通过</span></td></tr>
+  <tr><td><code>light_off.py</code></td><td>应急关灯（回读硬件确认）</td><td>真机 <span class="ok">通过</span></td></tr>
+</table>
+
+<h2>五、开源仓库与材料链接</h2>
+<p>
+硬件侧仓库为公开仓库，包含固件、接线、实测记录、数据集设计与全部上位机工具；
+仓库地址与网盘地址<b>统一通过赛事"作品其他材料链接"提交</b>，不在本材料正文中出现。
+</p>
+<table>
+  <tr><th>仓库目录</th><th>内容</th></tr>
+  <tr><td>01_ESP32固件</td><td>正式固件 + 5 个验证固件 + 一键烧录脚本</td></tr>
+  <tr><td>02_硬件安装与接线</td><td>接线图 / 引脚表 / 一页速查卡 / 安装手册 / 核对单</td></tr>
+  <tr><td>03_采购清单</td><td>最低成本采购清单</td></tr>
+  <tr><td>04_硬件验证记录</td><td>逐项实测原始记录（含全部串口日志与量化数据）</td></tr>
+  <tr><td>05_数据集与标签设计</td><td>标签图案 / A4 打印版 / 采集台 / 划分工具 / 说明书</td></tr>
+  <tr><td>硬件演示系统</td><td>上位机演示软件 + 标定 / 关灯 / 频闪复测等工具 + 现场演示检查单</td></tr>
+  <tr><td>界面截图</td><td>两个上位机工具的真实运行界面</td></tr>
+</table>
+
+<h2>六、素材许可与原创说明</h2>
+<ul>
+  <li>标签图案由本项目<b>自行生成</b>（脚本 <code>make_labels.ps1</code>），<b>不含任何第三方数据集或素材</b>，无需外部许可与署名；</li>
+  <li>数据集图片全部<b>自行采集</b>，采集后统一转 JPEG 并<b>清除 EXIF 元数据</b>；</li>
+  <li>软件侧使用 MVTec AD 公开基准数据集进行<b>算法评测</b>（仅用于评测，不随作品分发），其许可见其官方说明；</li>
+  <li>模型权重不随源码分发，通过独立下载方式获取；</li>
+  <li>全部材料遵守匿名要求：不含学校名称与校徽、指导教师信息、团队成员姓名、学号与个人账号。</li>
+</ul>
+
+</body>
+</html>

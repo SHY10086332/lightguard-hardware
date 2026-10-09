@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>光稳智检 · 答辩汇报</title>
+<style>
+  @page { size: 338.7mm 190.5mm; margin: 0; }   /* 16:9 一页一张幻灯片 */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; color: #16202e; }
+  .slide { width: 338.7mm; height: 190.5mm; padding: 16mm 18mm; page-break-after: always;
+           position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  .slide:last-child { page-break-after: auto; }
+  .cover { background: linear-gradient(135deg, #1d3a6e 0%, #2f6fed 100%); color: #fff;
+           justify-content: center; }
+  .cover h1 { font-size: 46pt; letter-spacing: 3px; margin-bottom: 6mm; }
+  .cover .sub { font-size: 17pt; opacity: .92; line-height: 1.7; }
+  .cover .meta { position: absolute; bottom: 14mm; left: 18mm; font-size: 12pt; opacity: .8; }
+  h2 { font-size: 26pt; color: #1d3a6e; border-left: 7px solid #2f6fed; padding-left: 6mm;
+       margin-bottom: 7mm; }
+  h3 { font-size: 15pt; color: #2f6fed; margin: 4mm 0 2mm; }
+  ul { margin-left: 7mm; }
+  li { font-size: 15pt; line-height: 1.85; margin-bottom: 1.5mm; }
+  li b { color: #0d6b3f; }
+  .two { display: flex; gap: 10mm; flex: 1; }
+  .two > div { flex: 1; }
+  table { border-collapse: collapse; width: 100%; margin-top: 2mm; }
+  th, td { border: 1px solid #b9c6da; padding: 2.4mm 3mm; font-size: 12.5pt; text-align: left; }
+  th { background: #eaf1fd; color: #1d3a6e; }
+  .kpi { display: flex; gap: 6mm; margin: 5mm 0; }
+  .kpi div { flex: 1; background: #f2f6fd; border: 1px solid #cfdcf2; border-radius: 3mm;
+             padding: 5mm 4mm; text-align: center; }
+  .kpi .n { font-size: 27pt; font-weight: 700; color: #2f6fed; }
+  .kpi .t { font-size: 12pt; color: #56657d; margin-top: 2mm; }
+  .note { font-size: 11.5pt; color: #6b7686; margin-top: auto; }
+  .flow { font-size: 14pt; line-height: 2.1; background: #f7f9fd; border: 1px solid #dde6f5;
+          border-radius: 3mm; padding: 5mm 6mm; }
+  .tag { display: inline-block; background: #eaf1fd; color: #1d3a6e; border-radius: 2mm;
+         padding: 1mm 3mm; font-size: 11.5pt; margin-right: 2mm; }
+  .fine { font-size: 11pt; color: #7a8798; }
+</style>
+</head>
+<body>
+
+<!-- 1 封面 -->
+<section class="slide cover">
+  <h1>光稳智检</h1>
+  <div class="sub">
+    光照闭环 + 数据集生产线的工业视觉质检方案<br>
+    用"稳定的光"换来"稳定的判定"
+  </div>
+  <div class="meta">AI + 软件 / AI + 硬件 两件作品 · 匿名答辩版</div>
+</section>
+
+<!-- 2 痛点 -->
+<section class="slide">
+  <h2>一、工业视觉质检的三个真实痛点</h2>
+  <ul>
+    <li><b>光照一抖，判定就飘</b> —— 同一片产品，光变了，像素分布就变了，模型判错却查不出原因</li>
+    <li><b>缺陷样本太难攒</b> —— 产线上"坏品"稀少，收集几百张缺陷图往往不现实</li>
+    <li><b>数据不可追溯</b> —— 拍完的图片说不清"当时是什么光照条件"，实验无法复现</li>
+  </ul>
+  <div class="note">我们的切入点：不去堆模型，先把"成像条件"变成可控、可复现的工程量。</div>
+</section>
+
+<!-- 3 方案总览 -->
+<section class="slide">
+  <h2>二、方案总览：一条闭环，三件事</h2>
+  <div class="flow">
+    ① <b>稳光</b>：BH1750 照度传感器 → ESP32 → PWM 调光 → 灯带，自动收敛到目标照度<br>
+    ② <b>判定</b>：固定光照下拍照 → 异常检测 / 参考图比对 → 输出正常 / 异常 + 差异位置<br>
+    ③ <b>反馈</b>：结果经串口下发硬件 → 绿灯（正常）/ 红灯 + 蜂鸣（异常）
+  </div>
+  <div class="two" style="margin-top:6mm">
+    <div>
+      <h3>软件侧</h3>
+      <ul><li>本地 Flask + PyTorch，推理在本机</li><li>15 类权重、阈值可调、批量检测、报告导出</li></ul>
+    </div>
+    <div>
+      <h3>硬件侧</h3>
+      <ul><li>ESP32 + BH1750 + MOS + COB 灯带</li><li>8 kHz PWM（抑制相机频闪条纹）</li></ul>
+    </div>
+  </div>
+</section>
+
+<!-- 4 硬件 -->
+<section class="slide">
+  <h2>三、硬件：把"光"变成可控量</h2>
+  <table>
+    <tr><th>部件</th><th>规格 / 接法</th><th>作用</th></tr>
+    <tr><td>主控</td><td>ESP32-D0WD-V3，4 MB Flash</td><td>调光 + 采样 + 指示</td></tr>
+    <tr><td>照度传感器</td><td>BH1750（I2C 0x23），SCL=GPIO22 / SDA=GPIO21 / 3V3</td><td>实时测光</td></tr>
+    <tr><td>驱动</td><td>MOS 模块，GPIO25 → IN+，GND → IN−</td><td>灯带不能直连 GPIO</td></tr>
+    <tr><td>光源</td><td>5V COB 灯带（独立 5V 4A 电源，与 ESP32 共地）</td><td>PWM 8 kHz / 8 位调光</td></tr>
+    <tr><td>指示</td><td>绿=GPIO26、红=GPIO27、蜂鸣器=GPIO32</td><td>判定结果反馈</td></tr>
+  </table>
+  <div class="note">固件默认亮度 0%：任何复位都不会"自己亮"，安全第一。</div>
+</section>
+
+<!-- 5 实测数据 -->
+<section class="slide">
+  <h2>四、实测数据（都有原始记录）</h2>
+  <div class="kpi">
+    <div><div class="n">9.1 s</div><div class="t">照度闭环收敛<br>300±20 lx</div></div>
+    <div><div class="n">6 / 6</div><div class="t">6 类缺陷图案<br>全部判对</div></div>
+    <div><div class="n">8.85 → 0.50</div><div class="t">PWM 1 kHz → 8 kHz<br>频闪条纹 σ</div></div>
+    <div><div class="n">0.000%</div><div class="t">同场景两帧差异<br>（阈值 0.25%）</div></div>
+  </div>
+  <ul>
+    <li>闭环过程：25%（223.3 lx）→ 31%（<b>283.3 lx</b>），落在 ±20 容差内</li>
+    <li>标定：<b>9.77 lx / 每 1% 亮度</b>（当前摆放位置；该斜率随位置变化，引用必须带位置前提）</li>
+    <li>工作亮度 <b>20%~30%</b>：纸面亮度 215、对比度 170、过曝像素 0.00%</li>
+  </ul>
+</section>
+
+<!-- 6 软件 -->
+<section class="slide">
+  <h2>五、软件：异常检测与现场操作</h2>
+  <div class="two">
+    <div>
+      <h3>能力</h3>
+      <ul>
+        <li>用<b>正常样本</b>训练（PatchCore 思路），不需要缺陷样本</li>
+        <li>15 类权重；阈值每类独立、可在页面调整</li>
+        <li>拍照检测 / 批量检测 / 对比模式</li>
+        <li>历史留档 + <b>CSV 报告导出</b>（Excel 直接打开）</li>
+        <li>硬件面板：连串口、控亮度、下发判定结果</li>
+      </ul>
+    </div>
+    <div>
+      <h3>指标（公开基准）</h3>
+      <table>
+        <tr><th>项目</th><th>结果</th></tr>
+        <tr><td>MVTec AD 15 类宏平均</td><td>Image AUROC <b>88.13%</b></td></tr>
+        <tr><td>像素级</td><td>Pixel AUROC 92.43%</td></tr>
+        <tr><td>F1 / AUPRO</td><td>91.21% / 73.72%</td></tr>
+        <tr><td>检测耗时</td><td>本机 CPU 约 0.15 s/张</td></tr>
+        <tr><td>端口 / 上传限制</td><td>5051 / 单张与批量均 16 MB</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="note fine">说明：上述为公开基准上的测试结果，不代表产线准确率承诺。</div>
+</section>
+
+<!-- 7 数据集 -->
+<section class="slide">
+  <h2>六、数据集：自采、可追溯、按样品划分</h2>
+  <div class="two">
+    <div>
+      <ul>
+        <li>标签 <b>60×40 mm</b>，A4 每页 18 个，页脚 <b>100 mm 校验尺</b></li>
+        <li><b>6 类</b>：正常 + 断线 / 缺墨 / 污点 / 划痕 / 偏位重影（缺陷均人眼可见）</li>
+        <li>采集台<b>只保留完整标签</b>，自动裁成"一图一标签"</li>
+        <li>逐张记录<b>照度 / 亮度 / 时间</b>（服务端读硬件真值）</li>
+        <li>图片统一转 JPEG 并<b>清除 EXIF</b> 元数据</li>
+      </ul>
+    </div>
+    <div>
+      <h3>划分规则（硬要求）</h3>
+      <table>
+        <tr><th>来源</th><th>去向</th></tr>
+        <tr><td>normal</td><td>train/good · calibration/good · test/good（<b>6:2:2</b>）</td></tr>
+        <tr><td>5 类缺陷</td><td>calibration/defect · test/defect（<b>1:2</b>）</td></tr>
+      </table>
+      <p style="font-size:12.5pt;margin-top:3mm">两条硬规则：<b>按样品划分</b>（同一张纸的多张图不拆散）、<b>缺陷图绝不进 train/good</b>。
+      划分脚本自带断言，输出 `划分清单.csv` 与统计报告。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 创新点 -->
+<section class="slide">
+  <h2>七、三个可验证的创新点</h2>
+  <ul>
+    <li><b>① 把"稳光"做成闭环工程，而不是靠人眼调</b><br>
+        <span class="fine">照度反馈 + 步长限幅 + 死区 + 自动估算增益；换几何不用改代码，实测 9.1 秒收敛</span></li>
+    <li><b>② 用"正常样本"建立判定基准，绕开缺陷样本稀缺</b><br>
+        <span class="fine">参考图比对（固定机位）与异常检测双路；真实相机帧误报 0.000%</span></li>
+    <li><b>③ 数据集生产线：采集即规范、图片可追溯</b><br>
+        <span class="fine">一图一标签自动裁切、逐张记录照度、按样品划分并自动断言，避免"数据白采"</span></li>
+  </ul>
+  <div class="note">所有数字都来自本项目的实测记录，可现场复现。</div>
+</section>
+
+<!-- 9 应用与推广 -->
+<section class="slide">
+  <h2>八、应用场景与推广路径</h2>
+  <div class="two">
+    <div>
+      <h3>适用对象</h3>
+      <ul>
+        <li>标签 / 印刷品外观质检</li>
+        <li>小五金、注塑件表面缺陷</li>
+        <li>需要"留痕可追溯"的检测工位</li>
+      </ul>
+    </div>
+    <div>
+      <h3>落地优势</h3>
+      <ul>
+        <li>硬件成本低（主控 + 传感器 + 灯带 + 摄像头）</li>
+        <li>纯本地推理，数据不出厂</li>
+        <li>判定结果直接驱动现场红绿灯与蜂鸣器</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">下一步：把闭环移植进固件、扩大自采数据集规模、在真实工位做连续运行验证。</div>
+</section>
+
+<!-- 10 结尾 -->
+<section class="slide cover">
+  <h1 style="font-size:38pt">光照稳定，判定才可靠</h1>
+  <div class="sub">光稳智检 —— 硬件闭环 + 软件判定 + 数据集生产线的完整方案</div>
+  <div class="meta">感谢聆听 · 欢迎提问</div>
+</section>
+
+</body>
+</html>

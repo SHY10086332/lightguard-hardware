@@ -260,15 +260,18 @@ def api_capture():
             return jsonify({"ok": True, "mode": "frame", "dataset": info,
                             "saved": 1, "dropped": 0})
 
-        # ---- 一图一标签：自动裁切（可只保留指定列） ----
+        # ---- 一图一标签：自动裁切（可只保留指定列 / 或按个数自动） ----
         cols_arg = (request.form.get("columns") or "").strip()
-        want_cols = None
+        want_cols, auto_cols = None, False
         if cols_arg:
-            try:
-                want_cols = [int(x) for x in cols_arg.replace("，", ",").split(",") if x.strip()]
-            except ValueError:
-                return jsonify({"ok": False, "error": "列号要写成 2,3 这样"}), 400
-        result = crop_labels(raw, columns=want_cols)
+            if cols_arg.lower() in ("auto", "自动"):
+                auto_cols = True
+            else:
+                try:
+                    want_cols = [int(x) for x in cols_arg.replace("，", ",").split(",") if x.strip()]
+                except ValueError:
+                    return jsonify({"ok": False, "error": "列号要写成 2,3 这样（或填 auto 按个数自动）"}), 400
+        result = crop_labels(raw, columns=want_cols, auto_columns=auto_cols)
         kept = result["kept"]
         if not kept:
             extra = "（当前只保留第 %s 列）" % cols_arg if want_cols else ""
@@ -295,7 +298,8 @@ def api_capture():
             "ok": True, "mode": "label",
             "saved": len(files), "dropped": result["dropped_count"],
             "files": files, "preview_url": preview_url,
-            "columns": result["columns"], "keep_columns": want_cols,
+            "columns": result["columns"], "keep_columns": result.get("keep_columns"),
+            "auto_columns": auto_cols,
             "lux": lux, "brightness": bright,
             "message": "已保存 %d 个标签（%d 个被剔除）" % (len(files), result["dropped_count"]),
         })

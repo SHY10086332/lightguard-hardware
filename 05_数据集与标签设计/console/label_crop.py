@@ -123,15 +123,35 @@ def detect_labels(data: bytes) -> Tuple[np.ndarray, List[Dict[str, Any]], List[D
 
 
 def crop_labels(data: bytes, margin_pct: float = 0.03,
-                columns: Optional[List[int]] = None) -> Dict[str, Any]:
+                columns: Optional[List[int]] = None,
+                auto_columns: bool = False) -> Dict[str, Any]:
     """把完整标签逐个裁成 JPEG。
 
-    margin_pct：裁切时向外留一点边（0.03 = 标签尺寸的 3%），避免切到边框。
-    columns   ：只保留这些列（1 起，从左到右）；None = 全部列。
+    margin_pct  ：裁切时向外留一点边（0.03 = 标签尺寸的 3%），避免切到边框。
+    columns     ：只保留这些列（1 起，从左到右）；None = 全部列。
+    auto_columns：**按个数自动**——只保留"完整标签个数达到本帧最多"的那些列。
+                  例如一帧里第 1 列有 2 个、第 2 列也有 2 个、第 3 列只露出 1 个，
+                  那么第 3 列（个数少）会被自动剔除，不用手工选列。
     """
     img, labels, col_info = detect_labels(data)
     H, W = img.shape
-    keep_set = set(int(c) for c in columns) if columns else None
+
+    # 先算每列"完整"标签的个数（不完整的本来就不要，不参与比较）
+    if auto_columns:
+        complete_counts = {}
+        for it in labels:
+            if it["complete"]:
+                complete_counts[it["col"]] = complete_counts.get(it["col"], 0) + 1
+        if complete_counts:
+            best = max(complete_counts.values())
+            keep_set = {c for c, n in complete_counts.items() if n == best}
+        else:
+            keep_set = set()
+        reason_auto = "该列完整标签只有 %s 个，少于本帧最多的 %s 个（按个数自动剔除）"
+    else:
+        keep_set = set(int(c) for c in columns) if columns else None
+        reason_auto = ""
+
     kept, dropped = [], []
     for it in labels:
         x, y, w, h = it["box"]
@@ -139,9 +159,10 @@ def crop_labels(data: bytes, margin_pct: float = 0.03,
             dropped.append({k: it[k] for k in ("box", "row", "col", "reason", "brightness")})
             continue
         if keep_set is not None and it["col"] not in keep_set:
+            why = (reason_auto % (complete_counts.get(it["col"], 0), max(complete_counts.values()))
+                   if auto_columns and complete_counts else "不在保留的列里（列筛选）")
             dropped.append({"box": it["box"], "row": it["row"], "col": it["col"],
-                            "brightness": it["brightness"],
-                            "reason": "不在保留的列里（列筛选）"})
+                            "brightness": it["brightness"], "reason": why})
             continue
         mx, my = int(w * margin_pct), int(h * margin_pct)
         x0, y0 = max(0, x - mx), max(0, y - my)
@@ -157,12 +178,14 @@ def crop_labels(data: bytes, margin_pct: float = 0.03,
                      "brightness": it["brightness"], "size": [int(x1 - x0), int(y1 - y0)],
                      "jpeg": enc.tobytes()})
     return {"kept": kept, "dropped": dropped, "columns": col_info,
-            "preview": _preview(img, kept, dropped, col_info, keep_set),
-            "total_found": len(labels), "kept_count": len(kept), "dropped_count": len(dropped)}
+            "preview": _preview(img, kept, dropped, col_info, keep_set, auto_columns),
+            "total_found": len(labels), "kept_count": len(kept), "dropped_count": len(dropped),
+            "keep_columns": sorted(keep_set) if keep_set else None}
 
 
 def _preview(img: np.ndarray, kept: List[Dict], dropped: List[Dict],
-             col_info: List[Dict], keep_set: Optional[set]) -> Optional[bytes]:
+             col_info: List[Dict], keep_set: Optional[set],
+             auto_columns: bool = False) -> Optional[bytes]:
     """标注预览图：顶部标出每列编号与亮度（保留的用绿色、被筛掉的用灰色）、
     绿框=已保存、红框=已剔除"""
     try:

@@ -96,9 +96,10 @@
       <label class="hint"><input type="checkbox" id="crop-mode" checked>
         一图一标签（自动裁切：只留**完整**标签，被画面边缘裁掉的直接剔除）</label>
     </div>
+    <div class="hint mt">摄像头诊断：<span id="camdiag">尚未打开</span></div>
     <div class="row mt">
       <span class="hint">只保留列（不同列亮度不同，混在一起会让模型学歪）：</span>
-      <input id="cols" type="text" placeholder="留空=全部，例：2,3" style="width:130px">
+      <input id="cols" type="text" placeholder="留空=全部 / auto=按个数自动 / 例：2,3" style="width:170px">
       <span id="col-btns" class="row" style="gap:6px"></span>
     </div>
     <div class="row mt" id="crop-preview-box" style="display:none">
@@ -241,22 +242,64 @@
       if (keep) sel.value = keep;
     } catch (e) {}
   }
-  async function openCam() {
-    try {
-      const id = $('cam-select').value;
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: id ? { deviceId: { exact: id } } : { width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      });
-      $('video').srcObject = stream;
-      $('btn-shot').disabled = false;
-      $('btn-close').disabled = false;
-      $('btn-open').disabled = true;
-      await listCams();
-      say('摄像头已打开。先确认画面里的标签清晰、光照均匀，再开始采集。', 'ok');
-    } catch (e) {
-      say('打不开摄像头：' + e.message + '（请用 http://127.0.0.1 打开本页，并允许摄像头权限）', 'err');
+  // ---- 摄像头：多套参数自动降级 + 帧检测 ----
+  // 踩过的坑：这台 USB 摄像头"能打开但拿到的是空流"（浏览器预览一直黑屏，
+  // 而 ffmpeg 抓帧正常）。所以不能只看 getUserMedia 成功与否，
+  // 必须**等真的收到帧**（readyState>=2 且 videoWidth>0），拿不到就换下一套参数。
+  function camDiag(msg) {
+    const el = $('camdiag');
+    if (el) el.textContent = msg;
+  }
+  async function streamHasFrames(s, ms) {
+    const v = $('video');
+    v.srcObject = s;
+    try { await v.play(); } catch (e) {}
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      if (v.readyState >= 2 && v.videoWidth > 0) return true;
+      await new Promise((r) => setTimeout(r, 200));
     }
+    return false;
+  }
+  async function openCam() {
+    const id = $('cam-select').value;
+    const dev = id ? { deviceId: { exact: id } } : undefined;
+    const tries = [
+      ['1920x1080', { video: Object.assign({ width: { exact: 1920 }, height: { exact: 1080 } }, dev || {}), audio: false }],
+      ['1280x720', { video: Object.assign({ width: { exact: 1280 }, height: { exact: 720 } }, dev || {}), audio: false }],
+      ['1024x768', { video: Object.assign({ width: { exact: 1024 }, height: { exact: 768 } }, dev || {}), audio: false }],
+      ['640x480', { video: Object.assign({ width: { exact: 640 }, height: { exact: 480 } }, dev || {}), audio: false }],
+      ['默认尺寸', { video: dev || true, audio: false }],
+    ];
+    let lastErr = '';
+    for (const [tag, cons] of tries) {
+      let s = null;
+      try {
+        s = await navigator.mediaDevices.getUserMedia(cons);
+      } catch (e) {
+        lastErr = e.name + ': ' + e.message;
+        camDiag('参数 ' + tag + ' 打不开（' + e.name + '）');
+        continue;
+      }
+      const ok = await streamHasFrames(s, 4000);
+      if (ok) {
+        stream = s;
+        const v = $('video');
+        $('btn-shot').disabled = false;
+        $('btn-close').disabled = false;
+        $('btn-open').disabled = true;
+        camDiag('OK — ' + tag + '，实际 ' + v.videoWidth + 'x' + v.videoHeight + '，正在出帧');
+        await listCams();
+        say('摄像头已打开（' + tag + '）。确认画面里标签清晰、光照均匀再开始采集。', 'ok');
+        return;
+      }
+      camDiag('参数 ' + tag + ' 打开成功但收不到画面（空流），换下一种…');
+      s.getTracks().forEach((t) => t.stop());
+    }
+    $('video').srcObject = null;
+    say('摄像头打不开或收不到画面。最后错误：' + (lastErr || '所有参数都拿不到帧')
+        + ' —— 请关掉其它占用摄像头的程序（浏览器其它标签页/相机应用/微信），再重试。', 'err');
+    camDiag('失败 — ' + (lastErr || '所有参数都拿不到帧'));
   }
   function closeCam() {
     if (stream) stream.getTracks().forEach((t) => t.stop());
@@ -291,6 +334,7 @@
       return b;
     };
     box.appendChild(mk('全部', ''));
+    box.appendChild(mk('按个数自动', 'auto', '每列完整标签个数达到本帧最多的列才保留'));
     cols.forEach((c) => box.appendChild(mk('只留第' + c.col + '列', String(c.col),
       '该列平均亮度 ' + c.avg_brightness)));
     for (let i = 0; i + 1 < cols.length; i++) {
