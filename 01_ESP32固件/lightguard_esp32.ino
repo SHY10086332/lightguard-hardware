@@ -28,7 +28,11 @@ const int LED_PWM_FREQUENCY = 8000;
 const int LED_PWM_RESOLUTION = 8;
 
 BH1750 lightMeter;
-int brightnessPercent = 45;
+// ★ 上电默认亮度 = 0（安全第一）。
+// 原来这里是 45：结果"上位机被强杀（关窗口/任务管理器）或板子复位"时灯带会自己亮到 45%，
+// 实测确认过（进程被杀后回读 brightness=45、照度 415 lx）。正式固件改成 0 之后，
+// 任何复位/重插 USB 都不会有光；要亮灯一律由上位机显式发 LIGHT n。
+int brightnessPercent = 0;
 String resultState = "idle";
 
 void applyBrightness(int value) {

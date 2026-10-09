@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>硬件演示台 · LIGHTGUARD</title>
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#fff; --line:#e2e8f0; --text:#18212f; --dim:#69748a;
+    --brand:#2f6fed; --brand-dk:#2558c4; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
+    --shadow:0 2px 10px rgba(19,38,74,.07);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:13px 22px;
+         display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:9}
+  header h1{font-size:17px;margin:0;font-weight:650}
+  .tag{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:20px;padding:2px 10px}
+  .grow{flex:1}
+  main{max-width:1240px;margin:16px auto 60px;padding:0 18px;
+       display:grid;grid-template-columns:1.25fr 1fr;gap:15px;align-items:start}
+  @media(max-width:960px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:15px}
+  .card h2{font-size:14px;margin:0 0 11px;font-weight:650;display:flex;align-items:center;gap:8px}
+  .card h2 small{color:var(--dim);font-weight:400}
+  video{width:100%;background:#0b0f16;border-radius:9px;display:block;aspect-ratio:16/9;object-fit:contain}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;border:1px solid var(--line);background:#fff;color:var(--text);
+         border-radius:8px;padding:8px 13px;cursor:pointer;transition:.15s}
+  button:hover:not(:disabled){border-color:#c4d1e6;background:#f7f9fd}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+  button.primary:hover:not(:disabled){background:var(--brand-dk);border-color:var(--brand-dk)}
+  button.ok{background:#e9f9ee;border-color:#bfe6cd;color:#12683c;font-weight:600}
+  button.bad{background:#fdeceb;border-color:#f3c9c7;color:#a3282a;font-weight:600}
+  input,select{font:inherit;padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:#fff}
+  .mt{margin-top:11px}
+  .stat{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;text-align:center}
+  .stat>div{background:#f8fafd;border:1px solid var(--line);border-radius:9px;padding:8px 5px}
+  .stat .k{font-size:12px;color:var(--dim)}
+  .stat .v{font-size:18px;font-weight:650;font-variant-numeric:tabular-nums}
+  .verdict{border-radius:10px;padding:14px;text-align:center;font-size:26px;font-weight:700;
+           border:2px dashed var(--line);color:var(--dim);background:#fafbfd}
+  .verdict.normal{border-color:#bfe6cd;background:#e9f9ee;color:#12683c;border-style:solid}
+  .verdict.abnormal{border-color:#f3c9c7;background:#fdeceb;color:#a3282a;border-style:solid}
+  .msg{border-radius:8px;padding:8px 11px;font-size:13px;display:none}
+  .msg.show{display:block}
+  .msg.ok{background:#e9f9ee;color:#12683c;border:1px solid #bfe6cd}
+  .msg.err{background:#fdeceb;color:#a3282a;border:1px solid #f3c9c7}
+  .msg.info{background:#eef4ff;color:#1f4fa8;border:1px solid #cfdefb}
+  canvas{width:100%;height:92px;background:#0b0f16;border-radius:9px;display:block}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left;white-space:nowrap}
+  th{color:var(--dim);font-weight:600;background:#fafbfd}
+  .pill{display:inline-block;font-size:12px;border-radius:20px;padding:1px 8px}
+  .pill.n{background:#e9f9ee;color:#12683c}
+  .pill.a{background:#fdeceb;color:#a3282a}
+  .pill.u{background:#f1f3f7;color:var(--dim)}
+  .hint{font-size:12px;color:var(--dim)}
+  .paths{font-size:11.5px;color:var(--dim);word-break:break-all}
+  img.preview{width:100%;border-radius:9px;border:1px solid var(--line);background:#0b0f16}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔬 硬件演示台</h1>
+  <span class="tag" id="hw-tag">硬件：连接中…</span>
+  <span class="tag" id="loop-tag">稳光：空闲</span>
+  <span class="grow"></span>
+  <button id="btn-off" class="bad">关灯 (LIGHT 0)</button>
+  <button id="btn-idle">复位指示</button>
+</header>
+
+<main>
+  <!-- 左列：相机 + 判定 -->
+  <section class="card">
+    <h2>相机 <small>固定机位；判定用的是同一帧</small></h2>
+    <video id="video" playsinline muted></video>
+    <div class="row mt">
+      <button class="primary" id="btn-open">打开摄像头</button>
+      <button id="btn-close" disabled>关闭</button>
+      <select id="cam-select"></select>
+      <label class="hint"><input type="checkbox" id="auto-detect" checked> 自动判定</label>
+    </div>
+    <div class="row mt">
+      <button class="primary" id="btn-shot" disabled style="font-size:15px;padding:10px 20px">📷 拍照并判定</button>
+      <button id="btn-ref">设为参考图（先放合格品）</button>
+      <button id="btn-ref-clear">清除参考图</button>
+      <span class="hint">快捷键 <kbd>Enter</kbd> 拍照 · <kbd>0</kbd> 关灯</span>
+    </div>
+    <div class="verdict mt" id="verdict">尚未判定</div>
+    <div class="msg mt" id="msg"></div>
+    <div class="two mt">
+      <div><div class="hint">最近一张</div><img class="preview" id="shot" alt=""></div>
+      <div><div class="hint">差异图（红色=与参考图不一致处）</div><img class="preview" id="diff" alt=""></div>
+    </div>
+  </section>
+
+  <!-- 右列：闭环 + 状态 + 记录 -->
+  <div>
+    <section class="card">
+      <h2>照度闭环 <small>上位机自动稳光</small></h2>
+      <div class="row">
+        <span class="hint">目标 lx</span>
+        <input id="target" type="number" value="300" min="1" max="20000" style="width:88px">
+        <span class="hint">±</span>
+        <input id="tol" type="number" value="20" min="1" max="500" style="width:66px">
+        <button class="primary" id="btn-warm">开始稳光</button>
+        <button id="btn-stopwarm" disabled>停止</button>
+      </div>
+      <div class="row mt">
+        <span class="hint">手动亮度</span>
+        <input id="bright" type="number" value="25" min="0" max="100" style="width:70px">
+        <button id="btn-set">直接设置</button>
+        <span class="hint">实测 20%~35% 不过曝（本机 ≈180~320 lx）</span>
+      </div>
+      <canvas id="chart" class="mt"></canvas>
+      <div class="stat mt">
+        <div><div class="k">照度 lx</div><div class="v" id="v-lux">--</div></div>
+        <div><div class="k">亮度 %</div><div class="v" id="v-br">--</div></div>
+        <div><div class="k">迭代</div><div class="v" id="v-iter">--</div></div>
+        <div><div class="k">估算增益</div><div class="v" id="v-slope">--</div></div>
+      </div>
+      <div class="mt hint" id="loop-msg"></div>
+    </section>
+
+    <section class="card mt">
+      <h2>判定与反馈 <small>可手动发 RESULT</small></h2>
+      <div class="row">
+        <button class="ok" id="btn-normal">判为正常 → 绿灯</button>
+        <button class="bad" id="btn-abnormal">判为异常 → 红灯+蜂鸣</button>
+        <span class="hint">自动判定开启时，拍照后会自动发这里的指令</span>
+      </div>
+      <div class="stat mt" style="grid-template-columns:repeat(3,1fr)">
+        <div><div class="k">累计</div><div class="v" id="s-total">0</div></div>
+        <div><div class="k">正常</div><div class="v" id="s-normal" style="color:var(--ok)">0</div></div>
+        <div><div class="k">异常</div><div class="v" id="s-abnormal" style="color:var(--bad)">0</div></div>
+      </div>
+      <div class="row mt">
+        <span class="hint">判定阈值（差异占比 %）</span>
+        <input id="thr" type="number" value="0.25" step="0.05" min="0.01" max="100" style="width:80px">
+        <button id="btn-thr">应用</button>
+        <span class="hint" id="ref-info"></span>
+      </div>
+    </section>
+
+    <section class="card mt">
+      <h2>判定记录 <small>同时写入 CSV</small></h2>
+      <div style="max-height:240px;overflow:auto">
+        <table id="log"><thead><tr>
+          <th>时间</th><th>图片</th><th>lx</th><th>亮度</th><th>判定</th><th>差异%</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+      <div class="paths mt" id="paths"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let stream = null, busy = false, lastLoop = null;
+
+  let msgTimer = null;
+  function say(text, kind = 'info') {
+    const el = $('msg');
+    el.className = 'msg show ' + kind;
+    el.textContent = text;
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => el.classList.remove('show'), 4500);
+  }
+
+  function setVerdict(text, cls) {
+    const el = $('verdict');
+    el.textContent = text;
+    el.className = 'verdict mt' + (cls ? ' ' + cls : '');
+  }
+
+  // ---------------- 状态轮询 ----------------
+  function apply(s) {
+    const hw = s.hardware || {};
+    const tag = $('hw-tag');
+    if (hw.connected) {
+      tag.textContent = '硬件：已连接 ' + hw.port;
+      tag.style.color = '';
+    } else {
+      tag.textContent = '硬件：未连接';
+      tag.style.color = '#dc2626';
+    }
+    $('v-lux').textContent = (hw.lux === null || hw.lux === undefined) ? '--' : Number(hw.lux).toFixed(1);
+    $('v-br').textContent = (hw.brightness === null || hw.brightness === undefined) ? '--' : hw.brightness + '%';
+
+    const lp = s.loop || {};
+    lastLoop = lp;
+    $('loop-tag').textContent = lp.running ? ('稳光：进行中 ' + (lp.iterations || 0) + ' 次')
+                                           : (lp.converged ? '稳光：已达标' : '稳光：空闲');
+    $('v-iter').textContent = lp.iterations || 0;
+    $('v-slope').textContent = (lp.slope === null || lp.slope === undefined) ? '--' : lp.slope;
+    $('loop-msg').textContent = lp.message || '';
+    $('btn-warm').disabled = !!lp.running;
+    $('btn-stopwarm').disabled = !lp.running;
+
+    const d = s.detect || {};
+    if (d.has_reference) {
+      $('ref-info').textContent = '参考图：已设（' + (d.reference_size ? d.reference_size.join('×') : '') + '）';
+    } else {
+      $('ref-info').textContent = '参考图：未设置 → 自动判定不可用';
+    }
+    if (d.threshold && document.activeElement !== $('thr')) $('thr').value = d.threshold;
+
+    const st = s.stats || {};
+    $('s-total').textContent = st.total || 0;
+    $('s-normal').textContent = st.normal || 0;
+    $('s-abnormal').textContent = st.abnormal || 0;
+
+    $('paths').textContent = '输出目录：' + (s.out_dir || '') + '　记录表：' + (s.csv || '');
+    drawChart(lp.history || []);
+  }
+
+  async function poll() {
+    if (busy) return;
+    try { apply(await (await fetch('/api/status')).json()); } catch (e) {}
+  }
+
+  // ---------------- 照度曲线 ----------------
+  function drawChart(hist) {
+    const cv = $('chart'), ctx = cv.getContext('2d');
+    const w = cv.width = cv.clientWidth * 2, h = cv.height = 184;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 2;
+    for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(0, h * i / 4); ctx.lineTo(w, h * i / 4); ctx.stroke(); }
+    if (!hist.length) {
+      ctx.fillStyle = '#64748b'; ctx.font = '20px sans-serif';
+      ctx.fillText('稳光曲线（开始稳光后显示每次迭代的照度）', 10, h / 2);
+      return;
+    }
+    const lux = hist.map((p) => p.lux);
+    const target = (lastLoop && lastLoop.target) || Math.max(...lux);
+    const lo = Math.min(...lux, target) * 0.9, hi = Math.max(...lux, target) * 1.1;
+    const X = (i) => (hist.length === 1 ? w / 2 : 20 + i * (w - 40) / (hist.length - 1));
+    const Y = (v) => h - 12 - (v - lo) / (hi - lo || 1) * (h - 24);
+    // 目标线
+    ctx.strokeStyle = '#f59e0b'; ctx.setLineDash([8, 6]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, Y(target)); ctx.lineTo(w, Y(target)); ctx.stroke();
+    ctx.setLineDash([]);
+    // 曲线
+    ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    hist.forEach((p, i) => { i ? ctx.lineTo(X(i), Y(p.lux)) : ctx.moveTo(X(i), Y(p.lux)); });
+    ctx.stroke();
+    ctx.fillStyle = '#93c5fd';
+    hist.forEach((p, i) => { ctx.beginPath(); ctx.arc(X(i), Y(p.lux), 4, 0, 7); ctx.fill(); });
+    ctx.fillStyle = '#e5e7eb'; ctx.font = '18px sans-serif';
+    ctx.fillText('目标 ' + target + ' lx', 8, 22);
+  }
+
+  // ---------------- 摄像头 ----------------
+  async function listCams() {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      const sel = $('cam-select'); const keep = sel.value;
+      sel.innerHTML = devs.map((d, i) => `<option value="${d.deviceId}">${d.label || ('摄像头 ' + (i + 1))}</option>`).join('');
+      if (keep) sel.value = keep;
+    } catch (e) {}
+  }
+  async function openCam() {
+    try {
+      const id = $('cam-select').value;
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: id ? { deviceId: { exact: id } } : { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      $('video').srcObject = stream;
+      $('btn-shot').disabled = false; $('btn-close').disabled = false; $('btn-open').disabled = true;
+      await listCams();
+      say('摄像头已打开。先放一张合格品 → 点「设为参考图」，之后换缺陷品拍照即可自动判定。', 'ok');
+    } catch (e) {
+      say('打不开摄像头：' + e.message + '（请用 http://127.0.0.1 打开本页并允许权限）', 'err');
+    }
+  }
+  function closeCam() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; $('video').srcObject = null;
+    $('btn-shot').disabled = true; $('btn-close').disabled = true; $('btn-open').disabled = false;
+  }
+  function grab() {
+    const v = $('video'); const cv = document.createElement('canvas');
+    cv.width = v.videoWidth; cv.height = v.videoHeight;
+    cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+    return new Promise((res) => cv.toBlob((b) => res(b), 'image/jpeg', 0.95));
+  }
+
+  // ---------------- 动作 ----------------
+  async function post(url, body) {
+    const r = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    });
+    return r.json();
+  }
+  async function shoot() {
+    if (busy) return;
+    if (!stream) { say('先点「打开摄像头」', 'err'); return; }
+    const auto = $('auto-detect').checked;
+    if (auto && $('ref-info').textContent.includes('未设置')) {
+      say('自动判定需要参考图：先放合格品点「设为参考图」', 'err'); return;
+    }
+    busy = true; $('btn-shot').disabled = true;
+    try {
+      const blob = await grab();
+      const fd = new FormData();
+      fd.append('mode', auto ? 'auto' : 'manual');
+      fd.append('image', blob, 'shot.jpg');
+      const r = await (await fetch('/api/capture', { method: 'POST', body: fd })).json();
+      if (!r.ok) throw new Error(r.error || '失败');
+      $('shot').src = r.photo_url + '?t=' + Date.now();
+      if (r.diff_url) $('diff').src = r.diff_url + '?t=' + Date.now();
+      if (r.verdict === '正常') { setVerdict('✅ 正常', 'normal'); }
+      else if (r.verdict === '异常') { setVerdict('⛔ 异常', 'abnormal'); }
+      else { setVerdict('已存图（未判定）'); }
+      const dt = r.detect ? ('差异 ' + r.detect.defect_ratio + '% / 阈值 ' + r.detect.threshold + '%') : '';
+      say(`已保存 ${r.file}　照度 ${r.lux === null ? '--' : r.lux} lx　亮度 ${r.brightness === null ? '--' : r.brightness + '%'}　${dt}`, r.verdict === '异常' ? 'err' : 'ok');
+      await loadLog();
+    } catch (e) { say('拍照判定失败：' + e.message, 'err'); }
+    finally { busy = false; $('btn-shot').disabled = false; }
+  }
+  async function setReference() {
+    if (!stream) { say('先打开摄像头', 'err'); return; }
+    try {
+      const blob = await grab();
+      const fd = new FormData(); fd.append('image', blob, 'ref.jpg');
+      const r = await (await fetch('/api/reference', { method: 'POST', body: fd })).json();
+      if (!r.ok) throw new Error(r.error || '失败');
+      say(r.message + '（' + r.width + '×' + r.height + '）', 'ok');
+      await poll();
+    } catch (e) { say('设置参考图失败：' + e.message, 'err'); }
+  }
+  async function loadLog() {
+    try {
+      const s = await (await fetch('/api/log?limit=25')).json();
+      $('log').querySelector('tbody').innerHTML = (s.rows || []).map((r) => {
+        const cls = r[4] === '正常' ? 'n' : (r[4] === '异常' ? 'a' : 'u');
+        return `<tr><td>${r[0] || ''}</td><td>${r[1] || ''}</td><td>${r[2] || ''}</td>` +
+               `<td>${r[3] || ''}</td><td><span class="pill ${cls}">${r[4] || ''}</span></td><td>${r[5] || ''}</td></tr>`;
+      }).join('');
+      $('s-total').textContent = (s.stats || {}).total || 0;
+      $('s-normal').textContent = (s.stats || {}).normal || 0;
+      $('s-abnormal').textContent = (s.stats || {}).abnormal || 0;
+    } catch (e) {}
+  }
+
+  // ---------------- 绑定 ----------------
+  $('btn-open').onclick = openCam;
+  $('btn-close').onclick = closeCam;
+  $('cam-select').onchange = async () => { if (stream) { closeCam(); await openCam(); } };
+  $('btn-shot').onclick = shoot;
+  $('btn-ref').onclick = setReference;
+  $('btn-ref-clear').onclick = async () => { await post('/api/reference/clear'); say('参考图已清除', 'info'); poll(); };
+  $('btn-off').onclick = async () => {
+    const r = await post('/api/light', { brightness: 0 });
+    say(r.ok ? '灯带已关' : ('关灯失败：' + r.error), r.ok ? 'info' : 'err'); poll();
+  };
+  $('btn-set').onclick = async () => {
+    const r = await post('/api/light', { brightness: parseInt($('bright').value || '0', 10) });
+    say(r.ok ? ('亮度设为 ' + $('bright').value + '%') : ('失败：' + r.error), r.ok ? 'info' : 'err'); poll();
+  };
+  $('btn-warm').onclick = async () => {
+    const r = await post('/api/warm', {
+      target: parseFloat($('target').value || '300'), tolerance: parseFloat($('tol').value || '20'),
+    });
+    say(r.ok ? '开始稳光…' : ('无法开始：' + r.error), r.ok ? 'info' : 'err'); poll();
+  };
+  $('btn-stopwarm').onclick = async () => { await post('/api/stop'); say('已请求停止', 'info'); poll(); };
+  $('btn-normal').onclick = async () => {
+    const r = await post('/api/result', { value: 'normal' });
+    say(r.ok ? '已发 RESULT normal → 绿灯' : ('失败：' + r.error), r.ok ? 'ok' : 'err');
+    setVerdict('✅ 正常（手动）', 'normal'); poll();
+  };
+  $('btn-abnormal').onclick = async () => {
+    const r = await post('/api/result', { value: 'abnormal' });
+    say(r.ok ? '已发 RESULT abnormal → 红灯 + 蜂鸣' : ('失败：' + r.error), r.ok ? 'ok' : 'err');
+    setVerdict('⛔ 异常（手动）', 'abnormal'); poll();
+  };
+  $('btn-idle').onclick = async () => { await post('/api/result', { value: 'idle' }); say('指示已复位', 'info'); setVerdict('尚未判定'); poll(); };
+  $('btn-thr').onclick = async () => {
+    const r = await post('/api/threshold', { value: parseFloat($('thr').value) });
+    say(r.ok ? ('阈值已设为 ' + r.threshold + '%') : ('失败：' + r.error), r.ok ? 'info' : 'err');
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === 'Enter') { e.preventDefault(); shoot(); }
+    else if (e.key === '0') { e.preventDefault(); $('btn-off').click(); }
+  });
+  window.addEventListener('beforeunload', () => { if (stream) stream.getTracks().forEach((t) => t.stop()); });
+
+  poll(); loadLog();
+  setInterval(poll, 1000);
+  setInterval(loadLog, 5000);
+  navigator.mediaDevices && navigator.mediaDevices.addEventListener &&
+    navigator.mediaDevices.addEventListener('devicechange', listCams);
+})();
+</script>
+</body>
+</html>
