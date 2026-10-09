@@ -96,10 +96,16 @@
       <label class="hint"><input type="checkbox" id="crop-mode" checked>
         一图一标签（自动裁切：只留**完整**标签，被画面边缘裁掉的直接剔除）</label>
     </div>
+    <div class="row mt">
+      <span class="hint">只保留列（不同列亮度不同，混在一起会让模型学歪）：</span>
+      <input id="cols" type="text" placeholder="留空=全部，例：2,3" style="width:130px">
+      <span id="col-btns" class="row" style="gap:6px"></span>
+    </div>
     <div class="row mt" id="crop-preview-box" style="display:none">
       <div style="flex:1;min-width:260px">
         <div class="hint">本次裁切预览：<b style="color:var(--ok)">绿框=已保存</b>、
-          <b style="color:var(--bad)">红框=被裁掉已剔除</b>　<span id="last-file"></span></div>
+          <b style="color:var(--bad)">红框=被剔除</b>　顶部标出每列编号与亮度
+          <span id="col-info"></span>　<span id="last-file"></span></div>
         <img id="crop-preview" style="width:100%;border-radius:8px;border:1px solid var(--line);background:#0b0f16" alt="">
       </div>
     </div>
@@ -266,6 +272,33 @@
     cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
     return new Promise((res) => cv.toBlob((b) => res(b), 'image/jpeg', 0.95));
   }
+  // 列信息 + 快捷按钮：显示每列亮度，点一下就把"只保留列"填好
+  function renderCols(cols, keep) {
+    const box = $('col-btns');
+    box.innerHTML = '';
+    if (!cols.length) { $('col-info').textContent = ''; return; }
+    $('col-info').textContent = '　各列：' + cols.map((c) =>
+      `第${c.col}列 ${c.avg_brightness}（${c.count}个）`).join('，');
+    const mk = (label, val, title) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      if (title) b.title = title;
+      b.style.padding = '4px 10px';
+      b.onclick = () => {
+        $('cols').value = val;
+        say(val ? ('已设为只保留第 ' + val + ' 列（下次采集生效）') : '已设为保留全部列', 'info');
+      };
+      return b;
+    };
+    box.appendChild(mk('全部', ''));
+    cols.forEach((c) => box.appendChild(mk('只留第' + c.col + '列', String(c.col),
+      '该列平均亮度 ' + c.avg_brightness)));
+    for (let i = 0; i + 1 < cols.length; i++) {
+      const a = cols[i].col, b = cols[i + 1].col;
+      box.appendChild(mk(`留${a}+${b}列`, `${a},${b}`));
+    }
+  }
+
   async function shoot() {
     if (busy) return;
     if (!stream) { say('先点「打开摄像头」', 'err'); return; }
@@ -278,6 +311,7 @@
       const fd = new FormData();
       fd.append('class', curClass);
       fd.append('mode', $('crop-mode').checked ? 'label' : 'frame');
+      fd.append('columns', $('cols').value.trim());
       fd.append('image', blob, curClass + '.jpg');
       const r = await (await fetch('/api/capture', { method: 'POST', body: fd })).json();
       if (!r.ok) throw new Error(r.error || '保存失败');
@@ -285,11 +319,12 @@
       const brightTxt = (r.brightness === null || r.brightness === undefined) ? '--' : r.brightness + '%';
       if (r.mode === 'label') {
         say(`已保存 ${r.saved} 个标签（一图一标签）· ${luxTxt} · 亮度 ${brightTxt}`
-            + (r.dropped ? `　⚠ ${r.dropped} 个被画面裁掉、已剔除` : ''), r.dropped ? 'info' : 'ok');
+            + (r.dropped ? `　⚠ ${r.dropped} 个被剔除` : ''), r.dropped ? 'info' : 'ok');
         if (r.preview_url) {
           $('crop-preview').src = r.preview_url + '?t=' + Date.now();
           $('crop-preview-box').style.display = '';
         }
+        renderCols(r.columns || [], r.keep_columns);
         const first = (r.files && r.files[0]) ? r.files[0].file : '';
         const last = (r.files && r.files.length) ? r.files[r.files.length - 1].file : '';
         $('last-file').textContent = first && last ? (r.files.length > 1 ? `${first} … ${last}` : first) : '';
@@ -349,6 +384,10 @@
   window.addEventListener('beforeunload', () => { if (stream) stream.getTracks().forEach((t) => t.stop()); });
 
   loadClasses().then(loadRecent);
+  // 打开页面时若带 ?autocam=1 就自动开摄像头（做截图/演示时省一步）
+  if (new URLSearchParams(location.search).has('autocam')) {
+    setTimeout(openCam, 600);
+  }
   setInterval(poll, 800);
   setInterval(loadRecent, 6000);
   navigator.mediaDevices && navigator.mediaDevices.addEventListener &&

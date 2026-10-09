@@ -260,21 +260,31 @@ def api_capture():
             return jsonify({"ok": True, "mode": "frame", "dataset": info,
                             "saved": 1, "dropped": 0})
 
-        # ---- 一图一标签：自动裁切 ----
-        result = crop_labels(raw)
+        # ---- 一图一标签：自动裁切（可只保留指定列） ----
+        cols_arg = (request.form.get("columns") or "").strip()
+        want_cols = None
+        if cols_arg:
+            try:
+                want_cols = [int(x) for x in cols_arg.replace("，", ",").split(",") if x.strip()]
+            except ValueError:
+                return jsonify({"ok": False, "error": "列号要写成 2,3 这样"}), 400
+        result = crop_labels(raw, columns=want_cols)
         kept = result["kept"]
         if not kept:
+            extra = "（当前只保留第 %s 列）" % cols_arg if want_cols else ""
             return jsonify({
                 "ok": False,
-                "error": "没找到完整标签（%d 个被画面边缘裁掉了）——把相机拉远一点，让标签完整入画"
-                         % result["dropped_count"],
+                "error": "没找到可用的完整标签%s：检出 %d 个，其中 %d 个被画面边缘裁掉"
+                         % (extra, result["total_found"], result["dropped_count"]),
+                "columns": result["columns"],
             }), 400
         files = []
         for item in kept:
             info = DM.save(cls, item["jpeg"], lux=lux, brightness=bright)
-            files.append({"file": info["file"], "box": item["box"],
-                          "row": item["row"], "col": item["col"], "size": item["size"]})
-        # 标注预览图（绿框=已存、红框=剔除），方便当场复核
+            files.append({"file": info["file"], "box": item["box"], "row": item["row"],
+                          "col": item["col"], "size": item["size"],
+                          "brightness": item["brightness"]})
+        # 标注预览图（顶部标出每列编号与亮度；绿框=已存、红框=剔除），方便当场复核
         preview_url = None
         if result.get("preview"):
             name = "_preview_%s.jpg" % time.strftime("%H%M%S")
@@ -285,9 +295,9 @@ def api_capture():
             "ok": True, "mode": "label",
             "saved": len(files), "dropped": result["dropped_count"],
             "files": files, "preview_url": preview_url,
+            "columns": result["columns"], "keep_columns": want_cols,
             "lux": lux, "brightness": bright,
-            "message": "已保存 %d 个标签（%d 个因被画面裁掉而剔除）"
-                       % (len(files), result["dropped_count"]),
+            "message": "已保存 %d 个标签（%d 个被剔除）" % (len(files), result["dropped_count"]),
         })
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

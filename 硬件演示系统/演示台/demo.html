@@ -413,6 +413,10 @@
   window.addEventListener('beforeunload', () => { if (stream) stream.getTracks().forEach((t) => t.stop()); });
 
   poll(); loadLog();
+  // 打开页面时若带 ?autocam=1 就自动开摄像头（做截图/演示时省一步）
+  if (new URLSearchParams(location.search).has('autocam')) {
+    setTimeout(openCam, 600);
+  }
   setInterval(poll, 1000);
   setInterval(loadLog, 5000);
   navigator.mediaDevices && navigator.mediaDevices.addEventListener &&

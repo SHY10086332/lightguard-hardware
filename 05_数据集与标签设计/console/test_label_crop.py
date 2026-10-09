@@ -75,10 +75,13 @@ def main() -> int:
 
     # ---- 场景 1：整张纸完整在画面里 ----
     data = make_sheet()
-    _, labels = detect_labels(data)
+    _, labels, colinfo = detect_labels(data)
     check("① 完整纸：检出 12 个标签", len(labels) == 12, "实际 %d 个" % len(labels))
     check("① 完整纸：全部判定为完整", all(l["complete"] for l in labels),
           "不完整的 %d 个" % sum(1 for l in labels if not l["complete"]))
+    check("① 完整纸：分成 3 列", len(colinfo) == 3, "实际 %d 列" % len(colinfo))
+    check("① 每列都有亮度信息", all(c["avg_brightness"] is not None for c in colinfo),
+          " / ".join("%.0f" % c["avg_brightness"] for c in colinfo))
     r = crop_labels(data)
     check("① 完整纸：裁出 12 张", r["kept_count"] == 12,
           "保留 %d / 剔除 %d" % (r["kept_count"], r["dropped_count"]))
@@ -90,9 +93,21 @@ def main() -> int:
     check("① 有标注预览图", r["preview"] is not None and len(r["preview"]) > 1000,
           "%d 字节" % (len(r["preview"]) if r["preview"] else 0))
 
+    # ---- 场景 1b：列筛选（只保留第 2、3 列） ----
+    r13 = crop_labels(data, columns=[2, 3])
+    check("①b 只保留 2、3 列：裁出 8 张", r13["kept_count"] == 8,
+          "保留 %d / 剔除 %d" % (r13["kept_count"], r13["dropped_count"]))
+    check("①b 保留的都是第 2、3 列", all(k["col"] in (2, 3) for k in r13["kept"]),
+          "列号 %s" % sorted({k["col"] for k in r13["kept"]}))
+    check("①b 被筛掉的标注了原因",
+          all("列筛选" in d["reason"] for d in r13["dropped"] if d["col"] not in (2, 3)),
+          "剔除 %d 个" % r13["dropped_count"])
+    r1 = crop_labels(data, columns=[1])
+    check("①b 只保留第 1 列：裁出 4 张", r1["kept_count"] == 4, "保留 %d" % r1["kept_count"])
+
     # ---- 场景 2：纸偏出画面（右列与下行被切） ----
     data2 = make_sheet(cols=4, rows=4, offset=(0, 0), canvas=(1300, 1000))
-    _, labels2 = detect_labels(data2)
+    _, labels2, _ci2 = detect_labels(data2)
     complete2 = [l for l in labels2 if l["complete"]]
     dropped2 = [l for l in labels2 if not l["complete"]]
     r2 = crop_labels(data2)
