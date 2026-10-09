@@ -46,9 +46,25 @@ from detect_ref import ReferenceDetector          # noqa: E402
 from flask import Flask, Response, jsonify, request, send_file   # noqa: E402
 from hw_link import HwLink                        # noqa: E402
 from light_loop import LightLoop                  # noqa: E402
+from PIL import Image                             # noqa: E402
 
 VERSION = "1.0"
 CSV_HEADER = ["时间", "图片", "照度lx", "亮度%", "判定", "差异%", "相似度%", "备注"]
+
+
+def _to_jpeg(raw: bytes, quality: int = 92) -> bytes:
+    """把上传的图片统一转成真正的 JPEG 再落盘。
+
+    两个好处：
+      1. 扩展名与内容一定一致（之前接口收到 PNG 也会照原样存成 .jpg）；
+      2. **顺手丢掉 EXIF 等元数据** —— 相机照片可能带设备/GPS/时间信息，
+         数据集是要交付出去的，不该把这些一起带出去。
+    """
+    with Image.open(io.BytesIO(raw)) as im:
+        rgb = im.convert("RGB")
+        buf = io.BytesIO()
+        rgb.save(buf, "JPEG", quality=quality)
+        return buf.getvalue()
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
@@ -189,7 +205,10 @@ def api_reference():
     f = request.files.get("image")
     if f is None:
         return jsonify({"ok": False, "error": "没有收到图片"}), 400
-    raw = f.read()
+    try:
+        raw = _to_jpeg(f.read())        # 统一成 JPEG（同时去掉 EXIF 元数据）
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"图片无法解码：{exc}"}), 400
     try:
         info = DET.set_reference(raw)
     except Exception as exc:
@@ -236,7 +255,10 @@ def api_capture():
     if f is None:
         return jsonify({"ok": False, "error": "没有收到图片"}), 400
     mode = (request.form.get("mode") or "auto").strip().lower()   # auto=自动判定 / manual=只存图
-    raw = f.read()
+    try:
+        raw = _to_jpeg(f.read())        # 统一成 JPEG（同时去掉 EXIF 元数据）
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"图片无法解码：{exc}"}), 400
 
     name = "photo_%s.jpg" % datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(PHOTOS, name)
