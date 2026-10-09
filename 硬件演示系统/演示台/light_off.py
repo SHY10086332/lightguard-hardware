@@ -52,11 +52,27 @@ def main() -> int:
     if not dev:
         print("[x] 没找到串口：ESP32 没插或串口被占用")
         return 1
-    try:
-        ser = serial.Serial(dev, 115200, timeout=1.0)
-    except Exception as exc:
-        print("[x] 打不开 %s：%s" % (dev, exc))
-        print("    可能是 Arduino 串口监视器 / 采集台 / 演示台 还占着串口，先关掉它们")
+    # 串口可能正被 hold_light.py（保持点灯）或演示台占着：
+    # 先放一个旗标文件请对方关灯，然后最多等 12 秒让它释放串口。
+    ser = None
+    flag = os.path.join(os.path.dirname(os.path.abspath(__file__)), "关灯.flag")
+    for attempt in range(13):
+        try:
+            ser = serial.Serial(dev, 115200, timeout=1.0)
+            break
+        except Exception as exc:
+            if attempt == 0:
+                try:
+                    with open(flag, "w", encoding="utf-8") as fh:
+                        fh.write("关灯")
+                    print("  串口被别的程序占着（%s）" % exc)
+                    print("  已放「关灯.flag」请求对方关灯，最多等 12 秒…")
+                except Exception:
+                    pass
+            time.sleep(1.0)
+    if ser is None:
+        print("[x] 等不到串口释放。可关掉占用串口的程序（hold_light.py / 演示台 / 串口监视器），")
+        print("    或者直接拔掉灯带的 5V 电源。")
         return 1
     time.sleep(0.4)
     ser.reset_input_buffer()
