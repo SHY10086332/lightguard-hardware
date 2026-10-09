@@ -111,12 +111,16 @@ def analyse(path: str) -> dict:
     roi = a[y:y + ROI_H, x:x + ROI_W]
     row_means = roi.mean(axis=1)
     col_means = roi.mean(axis=0)
+    # 过曝比例：整幅里接近白（>=250）的像素占比。
+    # 用"比例"而不是"均值"判过曝 —— 画面里有一块标签是黑的时，均值会被拉低，看不出过曝。
+    sat = float((a >= 250).mean())
     return {
         "file": os.path.basename(path),
         "frame": "%dx%d" % (im.width, im.height),
         "roi": "x=%d,y=%d %dx%d" % (x, y, ROI_W, ROI_H),
         "overall_mean": round(float(a.mean()), 1),
         "roi_mean": round(float(roi.mean()), 1),
+        "sat_ratio": round(sat, 4),
         "row_sigma": round(float(row_means.std()), 2),
         "col_sigma": round(float(col_means.std()), 2),
     }
@@ -127,6 +131,8 @@ def main() -> int:
     ap.add_argument("--port", default=None)
     ap.add_argument("--cam", default="video=USB Camera")
     ap.add_argument("--levels", default="0,25,50")
+    ap.add_argument("--settle", type=float, default=2.5,
+                    help="每档升亮后等多久再抓帧（默认 2.5 秒）；相机自动曝光收敛慢时要调大")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "banding_out"))
     ap.add_argument("--keep", action="store_true", help="保留抓帧（默认测完删除）")
     args = ap.parse_args()
@@ -148,14 +154,14 @@ def main() -> int:
     ser.reset_input_buffer()
     print("  串口: %s (%s)   相机: %s" % (dev, (cmd(ser, "PING", 1.5) or {}).get("device", "?"), args.cam))
     print("-" * 78)
-    print(" %5s | %8s | %9s | %8s | %8s | %s" % ("亮度%", "整幅均值", "ROI 均值", "行σ", "列σ", "判定"))
-    print("-" * 78)
+    print(" %5s | %8s | %8s | %7s | %8s | %s" % ("亮度%", "整幅均值", "ROI 均值", "过曝%", "行σ", "判定"))
+    print("-" * 82)
 
     rows = []
     try:
         for lvl in levels:
             cmd(ser, "LIGHT %d" % lvl, 1.2)
-            time.sleep(2.5)                       # 测量纪律
+            time.sleep(args.settle)               # 测量纪律：等灯稳 + 等相机自动曝光收敛
             path = grab(args.cam, args.out, "b%02d" % lvl)
             if not path:
                 print(" %5d | 抓帧失败（相机被占用？看 %s）" % (lvl, args.out))
@@ -163,7 +169,7 @@ def main() -> int:
             r = analyse(path)
             r["level"] = lvl
             rows.append(r)
-            if r["overall_mean"] > 250:
+            if r["sat_ratio"] > 0.35:
                 verdict = "画面过曝，数据不可用 ⚠"
             elif lvl == 0:
                 verdict = "灯灭（基线）"
@@ -173,23 +179,27 @@ def main() -> int:
                 verdict = "轻微"
             else:
                 verdict = "明显 ⚠"
-            print(" %5d | %8.1f | %9.1f | %8.2f | %8.2f | %s"
-                  % (lvl, r["overall_mean"], r["roi_mean"], r["row_sigma"], r["col_sigma"], verdict))
-        print("-" * 78)
-        good = [r for r in rows if r["level"] > 0 and r["overall_mean"] <= 250]
+            print(" %5d | %8.1f | %9.1f | %6.1f%% | %8.2f | %s"
+                  % (lvl, r["overall_mean"], r["roi_mean"], r["sat_ratio"] * 100, r["row_sigma"], verdict))
+        print("-" * 82)
+        good = [r for r in rows if r["level"] > 0 and r["sat_ratio"] <= 0.35]
         if good:
             avg_row = statistics.mean(r["row_sigma"] for r in good)
-            avg_baseline = BASELINE_1KHZ
-            print("  亮灯档平均 行σ = %.2f   1 kHz 基线 = %.1f" % (avg_row, avg_baseline))
+            print("  亮灯且不过曝的档位平均 行σ = %.2f   1 kHz 基线 = %.1f" % (avg_row, BASELINE_1KHZ))
             if avg_row < 3:
-                print("  结论：**8 kHz 下条纹已经基本消失**（σ 从 %.1f 降到 %.2f）→ 可关闭 §2.13 待复测项"
-                      % (avg_baseline, avg_row))
-            elif avg_row < avg_baseline * 0.7:
-                print("  结论：明显改善（σ %.1f → %.2f），但仍有残留 → 建议记录数据并注明" % (avg_baseline, avg_row))
+                print("  结论①：**8 kHz 下条纹已基本消失**（σ %.2f，1 kHz 时 8.8）→ 可关闭 §2.13 待复测项"
+                      % avg_row)
+            elif avg_row < BASELINE_1KHZ * 0.7:
+                print("  结论①：明显改善（σ %.1f → %.2f），但仍有残留" % (BASELINE_1KHZ, avg_row))
             else:
-                print("  结论：改善不明显 → 需要检查是否真的是 8 kHz 固件、或曝光是否过短（画面是否很亮）")
+                print("  结论①：改善不明显 → 检查是否真是 8 kHz 固件、以及曝光是否过短")
+            lo = min(r["level"] for r in good)
+            hi = max(r["level"] for r in good)
+            print("  结论②（对采集数据集同样有用）：**相机不过曝的亮度不一定从 %d%% 到 %d%% 都行** ——"
+                  % (lo, hi))
+            print("           实测可用档位：%s" % ", ".join("%d%%" % r["level"] for r in good))
         else:
-            print("  [!] 没有可用的亮灯档数据（都过曝或抓帧失败）")
+            print("  [!] 没有可用的亮灯档数据（都过曝或抓帧失败）——把亮度调低些再测")
         rep = os.path.join(args.out, "banding_report_%s.json" % datetime.now().strftime("%Y%m%d_%H%M%S"))
         with open(rep, "w", encoding="utf-8") as fh:
             json.dump({"baseline_1khz": BASELINE_1KHZ, "rows": rows}, fh, ensure_ascii=False, indent=2)
