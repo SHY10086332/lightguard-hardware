@@ -55,6 +55,7 @@ else:
 
 from dataset_manager import CLASSES, DatasetManager      # noqa: E402
 from flask import Flask, Response, jsonify, request, send_file   # noqa: E402
+from label_crop import crop_labels                       # noqa: E402
 
 # 采集台默认固定亮度（实测：100% 会过曝，箱内工作区间 20%~35%）
 DEFAULT_BRIGHTNESS = 25
@@ -237,20 +238,72 @@ def api_status():
 
 @app.route("/api/capture", methods=["POST"])
 def api_capture():
+    """采集一张。
+
+    mode=label（默认）：**一图一标签** —— 从整帧里自动找出每个完整标签，
+                        逐个裁成单独图片存下；被画面边缘裁掉的一律剔除。
+    mode=frame        ：整帧存一张（一图多标签的老行为）。
+    """
     file = request.files.get("image")
     cls = (request.form.get("class") or "").strip()
+    mode = (request.form.get("mode") or "label").strip().lower()
     if file is None:
         return jsonify({"ok": False, "error": "没有收到图片"}), 400
     try:
         raw = file.read()
         # 照度/亮度以**服务端刚读到的硬件状态**为准，前端传不了假数据
         hw = HW.refresh()
-        info = DM.save(cls, raw, lux=hw.get("lux"), brightness=hw.get("brightness"))
-        return jsonify({"ok": True, "dataset": info})
+        lux, bright = hw.get("lux"), hw.get("brightness")
+
+        if mode == "frame":
+            info = DM.save(cls, raw, lux=lux, brightness=bright)
+            return jsonify({"ok": True, "mode": "frame", "dataset": info,
+                            "saved": 1, "dropped": 0})
+
+        # ---- 一图一标签：自动裁切 ----
+        result = crop_labels(raw)
+        kept = result["kept"]
+        if not kept:
+            return jsonify({
+                "ok": False,
+                "error": "没找到完整标签（%d 个被画面边缘裁掉了）——把相机拉远一点，让标签完整入画"
+                         % result["dropped_count"],
+            }), 400
+        files = []
+        for item in kept:
+            info = DM.save(cls, item["jpeg"], lux=lux, brightness=bright)
+            files.append({"file": info["file"], "box": item["box"],
+                          "row": item["row"], "col": item["col"], "size": item["size"]})
+        # 标注预览图（绿框=已存、红框=剔除），方便当场复核
+        preview_url = None
+        if result.get("preview"):
+            name = "_preview_%s.jpg" % time.strftime("%H%M%S")
+            with open(os.path.join(DM.root, name), "wb") as fh:
+                fh.write(result["preview"])
+            preview_url = "/api/preview/" + name
+        return jsonify({
+            "ok": True, "mode": "label",
+            "saved": len(files), "dropped": result["dropped_count"],
+            "files": files, "preview_url": preview_url,
+            "lux": lux, "brightness": bright,
+            "message": "已保存 %d 个标签（%d 个因被画面裁掉而剔除）"
+                       % (len(files), result["dropped_count"]),
+        })
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"ok": False, "error": f"保存失败：{exc}"}), 500
+
+
+@app.route("/api/preview/<name>")
+def api_preview(name: str):
+    """裁切预览图（只允许取本目录下 _preview_*.jpg）"""
+    if not name.startswith("_preview_") or not name.endswith(".jpg") or "/" in name or "\\" in name:
+        return jsonify({"ok": False, "error": "非法文件名"}), 400
+    path = os.path.join(DM.root, name)
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "文件不存在"}), 404
+    return send_file(path, mimetype="image/jpeg")
 
 
 @app.route("/api/undo", methods=["POST"])

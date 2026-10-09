@@ -92,6 +92,17 @@
       <button id="btn-undo">↶ 撤销上一张</button>
       <span class="hint"><kbd>Enter</kbd> 采集 · <kbd>Z</kbd> 撤销 · <kbd>0</kbd> 关灯</span>
     </div>
+    <div class="row mt">
+      <label class="hint"><input type="checkbox" id="crop-mode" checked>
+        一图一标签（自动裁切：只留**完整**标签，被画面边缘裁掉的直接剔除）</label>
+    </div>
+    <div class="row mt" id="crop-preview-box" style="display:none">
+      <div style="flex:1;min-width:260px">
+        <div class="hint">本次裁切预览：<b style="color:var(--ok)">绿框=已保存</b>、
+          <b style="color:var(--bad)">红框=被裁掉已剔除</b>　<span id="last-file"></span></div>
+        <img id="crop-preview" style="width:100%;border-radius:8px;border:1px solid var(--line);background:#0b0f16" alt="">
+      </div>
+    </div>
     <div class="msg mt" id="msg"></div>
   </section>
 
@@ -266,12 +277,26 @@
       if (!blob) throw new Error('抓帧失败');
       const fd = new FormData();
       fd.append('class', curClass);
+      fd.append('mode', $('crop-mode').checked ? 'label' : 'frame');
       fd.append('image', blob, curClass + '.jpg');
       const r = await (await fetch('/api/capture', { method: 'POST', body: fd })).json();
       if (!r.ok) throw new Error(r.error || '保存失败');
-      const d = r.dataset;
-      const luxTxt = (d.lux === null || d.lux === undefined) ? '照度未记录' : (d.lux + ' lx');
-      say(`已保存 ${d.file}（${d.class_label}）· ${luxTxt} · 亮度 ${d.brightness === null || d.brightness === undefined ? '--' : d.brightness + '%'}`, 'ok');
+      const luxTxt = (r.lux === null || r.lux === undefined) ? '照度未记录' : (r.lux + ' lx');
+      const brightTxt = (r.brightness === null || r.brightness === undefined) ? '--' : r.brightness + '%';
+      if (r.mode === 'label') {
+        say(`已保存 ${r.saved} 个标签（一图一标签）· ${luxTxt} · 亮度 ${brightTxt}`
+            + (r.dropped ? `　⚠ ${r.dropped} 个被画面裁掉、已剔除` : ''), r.dropped ? 'info' : 'ok');
+        if (r.preview_url) {
+          $('crop-preview').src = r.preview_url + '?t=' + Date.now();
+          $('crop-preview-box').style.display = '';
+        }
+        const first = (r.files && r.files[0]) ? r.files[0].file : '';
+        const last = (r.files && r.files.length) ? r.files[r.files.length - 1].file : '';
+        $('last-file').textContent = first && last ? (r.files.length > 1 ? `${first} … ${last}` : first) : '';
+      } else {
+        const d = r.dataset;
+        say(`已保存 ${d.file}（整帧一图）· ${luxTxt} · 亮度 ${brightTxt}`, 'ok');
+      }
       await loadRecent();
       await poll();
     } catch (e) {
